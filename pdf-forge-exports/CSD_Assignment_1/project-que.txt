@@ -1,0 +1,70 @@
+Assignment 1
+AI-based Village Pond Planning System
+Background
+Water conservation is a major challenge in rural areas. One effective solution is the construction of
+ponds at suitable locations to harvest rainwater.  Selecting these locations requires analysis of terrain
+elevation, catchment areas, government land availability, rainfall patterns, and estimated storage capacity.
+In this assignment, you will develop a web application that assists village administrators in identifying
+suitable locations for pond construction using geospatial and satellite data.
+Objective
+Develop a complete web application capable of analyzing terrain and rainfall information to recommend
+suitable locations for pond construction. The system should estimate catchment areas, rainfall accumula-
+tion, pond depth, and storage capacity, and present the results through an interactive map interface.
+Functional Requirements
+The application shall support the following features.
+1. Display satellite imagery for a selected village.
+2. Visualize contour maps.
+3. Identify available land suitable for pond excavation.
+4. Estimate the catchment area contributing runoff to the selected location.
+5. Query historical rainfall data using publicly available APIs.
+6. Estimate runoff volume using rainfall and catchment information.
+7. Recommend an appropriate pond depth and approximate storage capacity.
+8. Overlay all results containing:
+• Selected pond location
+• Catchment area
+• Annual rainfall statistics
+• Estimated runoff volume
+• Recommended pond dimensions
+• Maps and visualizations
+Suggested Technology Stack
+Students are free to choose their implementation. A suggested stack is
+• Python
+1
+
+AI-based Village Pond Planning SystemAssignment 1
+• Flask or FastAPI
+• OpenCV
+• MongoDB/PostgreSQL
+• Elevation APIs (OpenZenith, etc.) and Rainfall APIs (IMD, Open-Meteo, NASA POWER, etc.)
+• A basic frontend libray
+Deliverables
+• Complete source code
+• Installation guide
+• API documentation
+• An accessible Front-end for users
+• Final technical report
+Important Dates
+• High-Level Design (HLD) Submission: August 10
+• Prototype Demonstration and Feedback: Lab Hours
+• Final Submission and Demonstration: September 5
+Evaluation
+CriterionMarks
+System functionality35
+Terrain and catchment analysis20
+Frontend and visualization5
+Software design and code quality15
+System Design and Management15
+Documentation and report10
+Total100
+LLM Usage Policy
+The use of Large Language Models (LLMs) such as ChatGPT, Claude, Gemini, GitHub Copilot, and
+similar AI-assisted coding tools is permitted for brainstorming, understanding concepts, debugging, doc-
+umentation, code refactoring, and improving code quality. However, students are expected to understand
+and be able to explain every component of their submitted work. Direct submission of AI-generated code
+without verification, modification, or understanding is considered unacceptable. During demonstrations,
+students may be asked to explain design decisions, algorithms, implementation details, and justify the use
+of external libraries or AI-generated code. Failure to satisfactorily explain the submitted work may result
+in reduction of marks or rejection of the submission. Students are instructed to cite use of AI tools in their
+project report and maintain academic integrity throughout the assignment, failure to do so will attract
+disciplinary action.
+*Used AI tools for formatting these pages2

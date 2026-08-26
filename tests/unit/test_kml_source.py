@@ -19,6 +19,7 @@ import pytest
 
 from src.schemas.terrain import ContourLine
 from src.terrain.base import TerrainSource
+from src.terrain.exceptions import TerrainParseError
 from src.terrain.kml_source import KMLTerrainSource
 
 FIXTURE_PATH = Path("tests/fixtures/contours_1m.kml")
@@ -281,13 +282,13 @@ class TestKMZSupport:
 class TestKMLErrors:
 
     def test_raises_on_invalid_xml(self):
-        with pytest.raises(ValueError, match="Invalid XML"):
+        with pytest.raises(TerrainParseError, match="could not be parsed"):
             source = KMLTerrainSource(b"not xml at all <<<", filename="bad.kml")
             source.extract_contours()
 
     def test_raises_on_truncated_xml(self):
         truncated = b"<?xml version='1.0'?><Folder xmlns='http://www.opengis.net/kml/2.2'><Place"
-        with pytest.raises(ValueError, match="Invalid XML"):
+        with pytest.raises(TerrainParseError, match="could not be parsed"):
             source = KMLTerrainSource(truncated, filename="truncated.kml")
             source.extract_contours()
 
@@ -295,11 +296,11 @@ class TestKMLErrors:
         buf = BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
             zf.writestr("readme.txt", "nothing here")
-        with pytest.raises(ValueError, match="no .kml files"):
+        with pytest.raises(TerrainParseError, match="no .kml files"):
             KMLTerrainSource(buf.getvalue(), filename="empty.kmz")
 
     def test_raises_on_bad_zip_as_kmz(self):
-        with pytest.raises(ValueError, match="valid ZIP"):
+        with pytest.raises(TerrainParseError, match="valid ZIP"):
             KMLTerrainSource(b"not a zip file", filename="fake.kmz")
 
     def test_empty_kml_returns_empty_list(self):

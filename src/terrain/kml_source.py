@@ -30,6 +30,7 @@ from lxml import etree
 
 from src.schemas.terrain import ContourLine
 from src.terrain.base import TerrainSource
+from src.terrain.exceptions import TerrainParseError
 
 # ── Namespace constants ────────────────────────────────────────────────────────
 
@@ -99,13 +100,15 @@ class KMLTerrainSource(TerrainSource):
                     name for name in zf.namelist() if name.lower().endswith(".kml")
                 ]
                 if not kml_names:
-                    raise ValueError("KMZ archive contains no .kml files")
+                    raise TerrainParseError("KMZ archive contains no .kml files")
 
                 # Standard convention: prefer doc.kml
                 target = "doc.kml" if "doc.kml" in kml_names else kml_names[0]
                 return zf.read(target)
         except zipfile.BadZipFile as exc:
-            raise ValueError(f"KMZ file is not a valid ZIP archive: {exc}") from exc
+            raise TerrainParseError(
+                f"KMZ file is not a valid ZIP archive: {exc}"
+            ) from exc
 
     # ── Main parsing ──────────────────────────────────────────────────────────
 
@@ -127,7 +130,9 @@ class KMLTerrainSource(TerrainSource):
         try:
             root = etree.fromstring(self._kml_bytes)
         except etree.XMLSyntaxError as exc:
-            raise ValueError(f"Invalid XML in KML file: {exc}") from exc
+            raise TerrainParseError(
+                f"KML file could not be parsed as XML: {exc}"
+            ) from exc
 
         contours: List[ContourLine] = []
 

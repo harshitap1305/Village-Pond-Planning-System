@@ -1,0 +1,4 @@
+This is definitely not XML.
+<<<GARBAGE DATA>>>
+{invalid: json, too}
+No closing tags here. Parser must raise TerrainParseError.

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Folder xmlns="http://www.opengis.net/kml/2.2">
+  <Placemark>
+    <name>280.0</name>
+    <LineString>
+      <coordinates>81.286,21.263 81.287,21.264 81.288,21.265</coordinates>
+    </LineString>
+  </Placemark>
+  <Placemark>
+    <name>280.0</name>
+    <LineString>
+      <coordinates>81.290,21.270 81.291,21.271 81.292,21.272</coordinates>
+    </LineString>
+  </Placemark>
+  <Placemark>
+    <name>280.0</name>
+    <LineString>
+      <coordinates>81.295,21.275 81.296,21.276 81.297,21.277</coordinates>
+    </LineString>
+  </Placemark>
+</Folder>

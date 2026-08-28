@@ -20,3 +20,20 @@ class CandidatePoint(BaseModel):
     lon: float
     elevation: float
     score: float
+
+
+class CatchmentMetrics(BaseModel):
+    """
+    Statistical summary of the terrain within a delineated catchment.
+
+    Attributes:
+        area_ha:         Total catchment area in hectares.
+        cell_count:      Number of DEM cells in the catchment.
+        elevation_stats: Dict with keys 'min', 'max', 'mean' in metres.
+        slope_stats:     Dict with keys 'min', 'max', 'mean' in degrees.
+    """
+
+    area_ha: float
+    cell_count: int
+    elevation_stats: dict[str, float]
+    slope_stats: dict[str, float]

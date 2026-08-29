@@ -22,8 +22,8 @@ Built for the CSD Assignment — AI-based Village Pond Planning System.
 ## Quick Start
 
 ### Prerequisites
-- Python 3.11+
-- `build-essential` and `libgdal-dev` (required for RichDEM)
+- Python 3.12
+- `build-essential` and `libgdal-dev` (required for geospatial libraries)
   ```bash
   sudo apt-get install build-essential libgdal-dev
   ```
@@ -36,7 +36,7 @@ git clone git@github.com:harshitap1305/Village-Pond-Planning-System.git
 cd Village-Pond-Planning-System
 
 # Create and activate virtual environment
-python3.11 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 
 # Install dependencies
@@ -46,19 +46,38 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-### Run the API
+### Run the API (Locally)
 
 ```bash
 uvicorn src.api.main:app --reload
 # Interactive API docs: http://localhost:8000/docs
 ```
 
+### Run the API (Docker)
+
+```bash
+docker compose up --build
+# Interactive API docs: http://localhost:8000/docs
+```
+
 ### Run Tests
 
 ```bash
+# Run fast unit tests only
+pytest -m "not integration"
+
+# Run all tests (including slow pipeline tests)
 pytest
+
 # With coverage:
 pytest --cov=src --cov-report=term-missing
+```
+
+## API Usage
+
+```bash
+# Example curl request to analyze a KML file
+curl -F "file=@tests/fixtures/contours_1m.kml" http://localhost:8000/analyzeContour
 ```
 
 ## Project Structure
@@ -84,6 +103,7 @@ docs/
 ## Architecture
 
 See [docs/architecture.md](docs/architecture.md) for the full system design.
+See [docs/submission_report.md](docs/submission_report.md) for the detailed project report.
 
 ## API Endpoints
 

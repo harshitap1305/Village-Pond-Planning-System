@@ -12,6 +12,9 @@ ignore = ["E501"]   # Black handles line length
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
+markers = [
+    "integration: marks tests as integration tests (slow, require full pipeline)",
+]
 
 [tool.mypy]
 python_version = "3.12"

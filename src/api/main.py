@@ -13,6 +13,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.api.error_handlers import register_error_handlers
 from src.api.routes import router
 from src.config import settings
 
@@ -39,3 +40,4 @@ app.add_middleware(
 )
 
 app.include_router(router)
+register_error_handlers(app)

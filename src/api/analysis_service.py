@@ -10,21 +10,23 @@ Pipeline order:
   2. Parse KML/KMZ → ContourLines (Module 2)
   3. Validate contours (Module 3)
   4. Build PointCloud (Module 4)
-  5. Build DEM (Module 5)
-  6. Fill sinks + compute slope (Module 6)
-  7. Compute flow direction (Module 7)
-  8. Compute flow accumulation (Module 8)
-  9. Find pond candidates (Module 9)
-  10. Back-project selected candidate to (row, col)
-  11. Delineate catchment mask via BFS (Module 10)
-  12. Convert mask to WGS84 polygon (Module 10)
-  13. Compute catchment metrics (Module 11)
-  14. Assemble and return AnalysisResult
+  5. Build raw DEM (Module 5)
+  6. Fill sinks → filled_dem + slope (Module 6)
+  7. Find pond candidates — returns conditioned routing outputs (Module 9)
+  8. Delineate catchment mask via multi-seed BFS (Module 10)
+  9. Convert mask to WGS84 polygon (Module 10)
+  10. Compute catchment metrics + consistency check (Module 11)
+  11. Assemble and return AnalysisResult
+
+Note on flow routing:
+  Steps 7+ use `conditioned_dem`/`flow_dir_cond`/`flow_accum_cond` returned
+  by find_candidates as the single source of truth. There is no separate
+  filled-DEM routing pass — that was removed in Module 9 v3 to ensure
+  consistent catchment areas at every stage.
 """
 
 import logging
 
-from pyproj import Transformer
 from shapely.geometry import mapping
 
 from src.catchment.candidates import find_candidates
@@ -34,8 +36,6 @@ from src.dem.builder import build_dem, validate_dem
 from src.dem.conditioning import fill_sinks
 from src.dem.slope import compute_slope_deg
 from src.geometry.pointcloud import build_point_cloud
-from src.hydrology.flow_accumulation import compute_flow_accumulation
-from src.hydrology.flow_direction import compute_flow_direction
 from src.hydrology.watershed import delineate_catchment
 from src.schemas.response import AnalysisMetadata, AnalysisResult, CatchmentResult
 from src.terrain.kml_source import KMLTerrainSource
@@ -94,63 +94,68 @@ class AnalysisService:
         pc = build_point_cloud(contours)
         _log.info("Point cloud: %d points, CRS=%s", len(pc.x), pc.crs)
 
-        # ── 5. Build DEM ──────────────────────────────────────────────────────
-        dem = build_dem(pc, cell_size=cell_size)
-        validate_dem(dem, contours)
+        # ── 5. Build raw DEM ──────────────────────────────────────────────────
+        raw_dem = build_dem(pc, cell_size=cell_size)
+        validate_dem(raw_dem, contours)
         _log.info(
             "DEM: %dx%d, cell_size=%.1fm, CRS=%s",
-            dem.rows,
-            dem.cols,
-            dem.cell_size,
-            dem.crs,
+            raw_dem.rows,
+            raw_dem.cols,
+            raw_dem.cell_size,
+            raw_dem.crs,
         )
 
-        # ── 6. Condition DEM + slope ──────────────────────────────────────────
-        dem = fill_sinks(dem)
-        slope = compute_slope_deg(dem)
-        _log.info("DEM conditioned (sinks filled), slope computed")
+        # ── 6. Fill sinks + compute slope ─────────────────────────────────────
+        # slope is computed on filled_dem (no routing ambiguity there).
+        # Filled_dem itself is passed to find_candidates for the depth diff.
+        filled_dem = fill_sinks(raw_dem)
+        slope = compute_slope_deg(filled_dem)
+        _log.info("Sinks filled, slope computed")
 
-        # ── 7–8. Flow routing ─────────────────────────────────────────────────
-        flow_dir = compute_flow_direction(dem)
-        flow_accum = compute_flow_accumulation(flow_dir, dem)
-        _log.info("Flow direction and accumulation computed")
-
-        # ── 9. Candidate identification ───────────────────────────────────────
-        candidates = find_candidates(dem, flow_accum, slope)
+        # ── 7. Candidate identification + conditioned routing ─────────────────
+        # find_candidates returns (candidates, conditioned_dem, flow_dir_cond,
+        # flow_accum_cond). The conditioned routing outputs are the single source
+        # of truth for ALL downstream steps — no separate routing pass needed.
+        candidates, _cond_dem, flow_dir_cond, flow_accum_cond = find_candidates(
+            raw_dem, filled_dem
+        )
         if not candidates:
             raise ValueError(
                 "No suitable pond candidates found in the provided terrain. "
-                "The terrain may be too steep or lack sufficient drainage area. "
-                "Try adjusting max_candidate_slope_deg or accumulation_percentile_threshold."
+                "The terrain may have no closed depressions larger than "
+                "min_depression_area_sqm with catchment >= min_catchment_area_ha."
             )
         selected = candidates[0]
         _log.info(
-            "Found %d candidates; selected lat=%.6f lon=%.6f",
+            "Found %d candidates; selected lat=%.6f lon=%.6f score=%.4f",
             len(candidates),
             selected.lat,
             selected.lon,
+            selected.score,
         )
 
-        # ── 10. Back-project selected candidate lat/lon → (row, col) ─────────
-        t = Transformer.from_crs("EPSG:4326", dem.crs, always_xy=True)
-        x_utm, y_utm = t.transform(selected.lon, selected.lat)
-        col = int((x_utm - dem.origin_x) / dem.cell_size)
-        row = int((dem.origin_y - y_utm) / dem.cell_size)
-        _log.info("Pour point (row=%d, col=%d)", row, col)
+        # ── 8 & 9. Watershed delineation & Polygonization for all candidates ──
+        for cand in candidates:
+            cand_mask = delineate_catchment(
+                flow_dir_cond, seed_cells=cand.bowl_sink_rcs
+            )
+            cand_poly = mask_to_polygon(cand_mask, filled_dem)
+            cand.catchment_polygon_geojson = mapping(cand_poly)
 
-        # ── 11. Watershed delineation ─────────────────────────────────────────
-        mask = delineate_catchment(flow_dir, pour_point_rc=(row, col))
-        _log.info("Catchment mask: %d cells", int(mask.sum()))
-
-        # ── 12. Polygonize catchment ──────────────────────────────────────────
-        polygon = mask_to_polygon(mask, dem)
+        # For the top candidate (selected_location), we also compute detailed metrics
+        # and do the consistency check using its mask.
+        mask = delineate_catchment(flow_dir_cond, seed_cells=selected.bowl_sink_rcs)
+        polygon = mask_to_polygon(mask, filled_dem)
         _log.info(
-            "Catchment polygon: %s, valid=%s", polygon.geom_type, polygon.is_valid
+            "Top catchment mask: %d cells, valid=%s", int(mask.sum()), polygon.is_valid
         )
 
-        # ── 13. Compute metrics ───────────────────────────────────────────────
-        metrics = compute_metrics(mask, dem, slope)
-        assert_area_consistency(metrics, int(flow_accum[row, col]))
+        # ── 10. Compute metrics + area consistency check ───────────────────────
+        metrics = compute_metrics(mask, filled_dem, slope)
+        accum_sum = int(sum(flow_accum_cond[rc] for rc in selected.bowl_sink_rcs))
+        assert_area_consistency(
+            metrics, accum_sum, num_seeds=len(selected.bowl_sink_rcs)
+        )
         _log.info(
             "Metrics: area_ha=%.4f, elev_mean=%.1f, slope_mean=%.1f",
             metrics.area_ha,
@@ -158,7 +163,7 @@ class AnalysisService:
             metrics.slope_stats["mean"],
         )
 
-        # ── 14. Assemble response ─────────────────────────────────────────────
+        # ── 11. Assemble response ─────────────────────────────────────────────
         return AnalysisResult(
             candidate_locations=candidates,
             selected_location=selected,
@@ -169,10 +174,10 @@ class AnalysisService:
                 slope_stats=metrics.slope_stats,
             ),
             metadata=AnalysisMetadata(
-                dem_rows=dem.rows,
-                dem_cols=dem.cols,
-                dem_cell_size_m=dem.cell_size,
-                crs_used=dem.crs,
+                dem_rows=raw_dem.rows,
+                dem_cols=raw_dem.cols,
+                dem_cell_size_m=raw_dem.cell_size,
+                crs_used=raw_dem.crs,
                 contour_count=len(contours),
             ),
         )

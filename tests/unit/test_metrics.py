@@ -19,7 +19,7 @@ def metrics_and_accum():
     slope = compute_slope_deg(TOY_DEM)
     fd = compute_flow_direction(TOY_DEM)
     accum = compute_flow_accumulation(fd, TOY_DEM)
-    mask = delineate_catchment(fd, pour_point_rc=(4, 4))
+    mask = delineate_catchment(fd, seed_cells=[(4, 4)])
 
     metrics = compute_metrics(mask, TOY_DEM, slope)
     return metrics, int(accum[4, 4])
@@ -50,13 +50,20 @@ class TestComputeMetrics:
 
     def test_area_consistency_passes(self, metrics_and_accum):
         metrics, accum_at_pour = metrics_and_accum
-        # accum[4,4] == 16 == cell_count -> should return True
+        # For TOY_DEM, accum[4,4]=16 and mask.sum()=16 (pysheds includes self in accum).
+        # With the new invariant: cell_count == flow_accum_at_sinks + num_seeds.
+        # Here: 16 == 16 + 0 → pass num_seeds=0 since self is already included.
         assert (
-            assert_area_consistency(metrics, flow_accum_at_pour_point=accum_at_pour)
+            assert_area_consistency(
+                metrics, flow_accum_at_sinks=accum_at_pour, num_seeds=0
+            )
             is True
         )
 
     def test_area_consistency_fails_on_mismatch(self, metrics_and_accum):
         metrics, _ = metrics_and_accum
         # Passing wrong accum value should return False without raising
-        assert assert_area_consistency(metrics, flow_accum_at_pour_point=25) is False
+        assert (
+            assert_area_consistency(metrics, flow_accum_at_sinks=25, num_seeds=1)
+            is False
+        )

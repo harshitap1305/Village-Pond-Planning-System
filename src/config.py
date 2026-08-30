@@ -37,11 +37,21 @@ class Settings(BaseSettings):
     # Extra padding around the bounding box so edge contour points aren't clipped.
     dem_buffer_cells: int = 2
 
-    # ── Hydrological Analysis (Modules 7–9) ──────────────────────────────────
-    # Only cells above this flow-accumulation percentile are pond candidates.
-    accumulation_percentile_threshold: float = 90.0
-    # Steeper sites than this (degrees) are excluded from candidates.
-    max_candidate_slope_deg: float = 15.0
+    # ── Candidate Detection (Module 9 — Depression Method) ───────────────────
+    # Minimum fill depth (metres) for a cell to count as a real depression.
+    # Eliminates IDW interpolation numerical noise (spurious sub-pixel pits).
+    min_depression_depth_m: float = 0.1
+
+    # Minimum depression footprint area (m²) — filters sub-grid noise.
+    # At 2m cell size, 500m² = 125 cells, safely above single-pixel artifacts.
+    min_depression_area_sqm: float = 500.0
+
+    # Minimum catchment area (hectares) draining to the depression's pour point.
+    # A bowl's footprint can be small but drain a large upstream area (or vice versa);
+    # both filters serve different physical purposes and must be kept separate.
+    # Default 0.5 ha = 5000 m².
+    min_catchment_area_ha: float = 0.5
+
     # Maximum number of ranked candidate locations returned by the API.
     max_candidates: int = 10
 

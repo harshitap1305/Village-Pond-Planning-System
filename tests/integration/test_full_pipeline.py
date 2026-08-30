@@ -20,9 +20,10 @@ class TestFullPipeline:
         assert len(pipeline_result.candidate_locations) > 0
 
     def test_selected_location_is_best_candidate(self, pipeline_result):
-        assert (
-            pipeline_result.selected_location == pipeline_result.candidate_locations[0]
-        )
+        # Compare public fields only (bowl_sink_rcs is an internal routing field excluded from eq)
+        s = pipeline_result.selected_location
+        b = pipeline_result.candidate_locations[0]
+        assert s.lat == b.lat and s.lon == b.lon and s.score == b.score
 
     def test_catchment_area_positive(self, pipeline_result):
         assert pipeline_result.catchment.area_ha > 0
@@ -54,6 +55,14 @@ class TestFullPipeline:
         assert m.dem_cell_size_m > 0
         assert m.crs_used.startswith("EPSG:")
         assert m.contour_count > 0
+
+    def test_candidate_new_fields_present(self, pipeline_result):
+        """New depression-method fields must be populated on every candidate."""
+        for c in pipeline_result.candidate_locations:
+            assert c.estimated_storage_m3 > 0
+            assert c.depression_area_ha > 0
+            assert 0.0 <= c.score <= 1.0
+            assert c.depression_depth_m > 0
 
     def test_idempotency(self):
         kml = FIXTURE.read_bytes()

@@ -14,7 +14,7 @@ from tests.fixtures.toy_dem import TOY_DEM
 @pytest.fixture
 def sample_mask():
     fd = compute_flow_direction(TOY_DEM)
-    return delineate_catchment(fd, pour_point_rc=(4, 4))
+    return delineate_catchment(fd, seed_cells=[(4, 4)])
 
 
 class TestPolygonize:

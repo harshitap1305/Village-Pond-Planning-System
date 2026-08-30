@@ -3,79 +3,64 @@ Catchment delineation using Breadth-First Search (BFS) over the reverse D8 graph
 """
 
 from collections import deque
-from typing import Tuple
+from typing import Sequence, Tuple
 
 import numpy as np
 
 from src.hydrology.flow_direction import _D8_DIRECTIONS
 
-# Build reverse map: code -> (upstream row delta, upstream col delta)
-# If cell A flows into cell B, looking from B, A is at (-dr, -dc)
-_REVERSE_DELTA: dict[int, tuple[int, int]] = {
-    code: (-dr, -dc) for code, dr, dc in _D8_DIRECTIONS
+# Forward delta map: code -> (row_delta, col_delta)
+_FORWARD_DELTA: dict[int, tuple[int, int]] = {
+    code: (dr, dc) for code, dr, dc in _D8_DIRECTIONS
 }
 
 
 def delineate_catchment(
-    flow_dir: np.ndarray, pour_point_rc: Tuple[int, int]
+    flow_dir: np.ndarray,
+    seed_cells: Sequence[Tuple[int, int]],
 ) -> np.ndarray:
     """
     Returns a boolean mask (same shape as flow_dir) where True indicates
-    cells that drain into the given pour point.
+    cells that drain into any of the given seed cells.
+
+    Uses BFS over the reverse D8 graph (walking upstream from seeds).
 
     Args:
-        flow_dir: 2D array of D8 flow direction codes.
-        pour_point_rc: (row, col) index of the pour point.
+        flow_dir:   2D array of D8 flow direction codes.
+        seed_cells: One or more (row, col) indices to seed the BFS from.
+                    Pass a list with a single element for the common single-sink case.
+                    Pass all tied minimum-elevation cells for flat-bottomed bowls
+                    to ensure the full watershed is captured regardless of
+                    which cell upstream tie-breaks happened to favour.
 
     Returns:
         Boolean numpy array mask of the watershed.
     """
     rows, cols = flow_dir.shape
 
-    # 1. Build reverse adjacency graph (incoming flow)
-    # incoming[r][c] = list of (nr, nc) neighbors that flow into (r, c)
+    # 1. Build reverse adjacency graph via a forward pass.
+    #    For each cell (r,c) that flows to (nr,nc), record (r,c) as an
+    #    incoming neighbor of (nr,nc).
     incoming: list[list[list[Tuple[int, int]]]] = [
         [[] for _ in range(cols)] for _ in range(rows)
     ]
     for r in range(rows):
         for c in range(cols):
             code = flow_dir[r, c]
-            if code in _REVERSE_DELTA:
-                dr, dc = _REVERSE_DELTA[code]
-                # If a cell at (r,c) has code C, it flows to (r-dr, c-dc).
-                # Wait, _REVERSE_DELTA contains the UPSTREAM offset.
-                # Actually, the original D8 delta is the DOWNSHIFT.
-                # Let's just use the logic we proved in the REPL:
-                # If cell A flows to cell B, then from B's perspective, A is at an offset.
-                # A easier, proven way is to do the forward pass:
-                # "I am at (r,c). I flow to (nr, nc). Therefore, I am an incoming node for (nr, nc)."
-                pass  # We will do this below instead of the reverse delta logic which can be confusing.
-
-    # 1. Build reverse adjacency graph (incoming flow) by walking forward.
-    incoming = [[[] for _ in range(cols)] for _ in range(rows)]
-
-    # Forward delta map for clarity
-    forward_delta = {code: (dr, dc) for code, dr, dc in _D8_DIRECTIONS}
-
-    for r in range(rows):
-        for c in range(cols):
-            code = flow_dir[r, c]
-            if code in forward_delta:
-                dr, dc = forward_delta[code]
+            if code in _FORWARD_DELTA:
+                dr, dc = _FORWARD_DELTA[code]
                 nr, nc = r + dr, c + dc
                 if 0 <= nr < rows and 0 <= nc < cols:
                     incoming[nr][nc].append((r, c))
 
-    # 2. BFS from pour point
+    # 2. BFS from all seed cells simultaneously.
     mask = np.zeros((rows, cols), dtype=bool)
+    queue: deque[Tuple[int, int]] = deque()
 
-    # Check if pour point is in bounds
-    pr, pc = pour_point_rc
-    if not (0 <= pr < rows and 0 <= pc < cols):
-        return mask
-
-    queue = deque([pour_point_rc])
-    mask[pour_point_rc] = True
+    for sr, sc in seed_cells:
+        if 0 <= sr < rows and 0 <= sc < cols and not mask[sr, sc]:
+            mask[sr, sc] = True
+            queue.append((sr, sc))
 
     while queue:
         r, c = queue.popleft()

@@ -43,3 +43,5 @@ tmp_outputs/
 
 # LibreOffice lock files
 .~lock.*
+demo_result.geojson
+scripts/test_monkeypatch.py

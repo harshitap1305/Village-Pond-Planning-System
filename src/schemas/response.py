@@ -48,6 +48,27 @@ class AnalysisMetadata(BaseModel):
     contour_count: int
 
 
+class WaterExclusionMetadata(BaseModel):
+    """
+    Metadata about the OSM water exclusion layer used in this analysis.
+
+    Attributes:
+        source:                How the water mask was produced.
+                               ``"osm"``                — live Overpass API data
+                               ``"flat_area_heuristic"`` — OSM unavailable; large flat
+                                                           regions used as fallback.
+                               ``"unavailable"``         — mask was empty / all sources failed.
+        excluded_feature_count: Number of distinct OSM water features fetched.
+                                0 when source is not ``"osm"``.
+        attribution:           Required ODbL credit string for OSM data.
+                               Display this wherever the catchment map is shown.
+    """
+
+    source: str
+    excluded_feature_count: int
+    attribution: str
+
+
 class AnalysisResult(BaseModel):
     """
     Top-level response for POST /analyzeContour.
@@ -57,9 +78,11 @@ class AnalysisResult(BaseModel):
         selected_location:   The top-ranked candidate used for watershed delineation.
         catchment:           Catchment polygon and terrain statistics.
         metadata:            Provenance information about the analysis run.
+        water_exclusion:     Metadata about the OSM water exclusion layer applied.
     """
 
     candidate_locations: List[CandidatePoint]
     selected_location: CandidatePoint
     catchment: CatchmentResult
     metadata: AnalysisMetadata
+    water_exclusion: WaterExclusionMetadata

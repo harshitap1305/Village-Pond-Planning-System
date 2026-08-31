@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from shapely.geometry import shape
@@ -7,11 +8,24 @@ from src.api.analysis_service import analysis_service
 
 FIXTURE = Path("tests/fixtures/contours_1m.kml")
 
+# ---------------------------------------------------------------------------
+# OSM API mock — integration tests must not hit a live server.
+# We return an empty elements XML, which means the water exclusion mask will
+# be all-False (no features to exclude), and the pipeline continues normally.
+# The water_exclusion.source will be "osm" with feature_count=0.
+# ---------------------------------------------------------------------------
+_EMPTY_OSM = '<?xml version="1.0" encoding="UTF-8"?><osm version="0.6"></osm>'
+
 
 @pytest.fixture(scope="module")
 def pipeline_result():
-    """Run the full pipeline once per module — expensive (~60s)."""
-    return analysis_service.run(FIXTURE.read_bytes(), "contours_1m.kml")
+    """Run the full pipeline once per module — expensive (~60s).
+    OSM API is mocked so the test is self-contained and offline."""
+    with patch(
+        "src.catchment.water_exclusion.OsmApiClient.query_water_features",
+        return_value=_EMPTY_OSM,
+    ):
+        return analysis_service.run(FIXTURE.read_bytes(), "contours_1m.kml")
 
 
 @pytest.mark.integration
@@ -64,10 +78,25 @@ class TestFullPipeline:
             assert 0.0 <= c.score <= 1.0
             assert c.depression_depth_m > 0
 
+    def test_water_exclusion_metadata_present(self, pipeline_result):
+        """water_exclusion block must always be present in the response."""
+        we = pipeline_result.water_exclusion
+        assert we.source in {"osm", "flat_area_heuristic", "unavailable"}
+        assert we.excluded_feature_count >= 0
+        assert "OpenStreetMap" in we.attribution
+
+    def test_water_exclusion_source_is_osm(self, pipeline_result):
+        """The mock returns a successful (empty) Overpass response — source must be osm."""
+        assert pipeline_result.water_exclusion.source == "osm"
+
     def test_idempotency(self):
         kml = FIXTURE.read_bytes()
-        r1 = analysis_service.run(kml, "contours_1m.kml")
-        r2 = analysis_service.run(kml, "contours_1m.kml")
+        with patch(
+            "src.catchment.water_exclusion.OsmApiClient.query_water_features",
+            return_value=_EMPTY_OSM,
+        ):
+            r1 = analysis_service.run(kml, "contours_1m.kml")
+            r2 = analysis_service.run(kml, "contours_1m.kml")
         assert r1.candidate_locations == r2.candidate_locations
         assert r1.catchment.area_ha == r2.catchment.area_ha
         assert r1.catchment.polygon_geojson == r2.catchment.polygon_geojson

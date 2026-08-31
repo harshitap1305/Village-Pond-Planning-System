@@ -43,6 +43,7 @@ _log = logging.getLogger(__name__)
 def find_candidates(
     raw_dem: DEM,
     filled_dem: DEM,
+    water_mask: np.ndarray | None = None,
 ) -> tuple[List[CandidatePoint], DEM, np.ndarray, np.ndarray]:
     """
     Identify pond candidate locations via the depression-based method.
@@ -50,6 +51,10 @@ def find_candidates(
     Args:
         raw_dem:    The original DEM before sink-filling (output of build_dem).
         filled_dem: The sink-filled DEM (output of fill_sinks).
+        water_mask: Optional boolean array (same shape as DEM). When provided,
+                    any depression that overlaps a True cell is hard-vetoed
+                    and never returned as a candidate. Pass the output of
+                    :func:`src.catchment.water_exclusion.build_water_exclusion_mask`.
 
     Returns:
         A 4-tuple of:
@@ -93,6 +98,18 @@ def find_candidates(
 
         # Discard noise: too small a footprint
         if bowl_mask.sum() * cell_size**2 < settings.min_depression_area_sqm:
+            continue
+
+        # Hard veto: any overlap with mapped water body disqualifies this bowl.
+        # This prevents rivers, lakes, and reservoirs from being selected as
+        # new pond sites regardless of how attractive their flow-accumulation
+        # numbers look.
+        if water_mask is not None and (water_mask & bowl_mask).any():
+            _log.debug(
+                "Bowl %d vetoed — overlaps OSM water mask (%d cells)",
+                bowl_id,
+                int((water_mask & bowl_mask).sum()),
+            )
             continue
 
         surviving_ids.append(bowl_id)

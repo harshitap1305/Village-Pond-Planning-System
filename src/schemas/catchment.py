@@ -29,6 +29,12 @@ class CandidatePoint(BaseModel):
     Internal field (excluded from API serialization):
         bowl_sink_rcs:        List of (row, col) tuples for the conditioned-DEM
                               sink cells used to seed the watershed BFS.
+        on_or_near_mapped_water: True if the pour point falls inside or within
+                              one DEM cell of the OSM water exclusion mask.
+                              Informational only — candidates found by the
+                              automatic search will never have this True (they
+                              were vetoed). Exposed as a warning for cases where
+                              the user manually overrides the pour point.
     """
 
     lat: float
@@ -40,6 +46,7 @@ class CandidatePoint(BaseModel):
     catchment_area_ha: float
     estimated_storage_m3: float
     had_flat_bottom: bool = False
+    on_or_near_mapped_water: bool = False
     catchment_polygon_geojson: dict | None = Field(
         default=None, description="GeoJSON polygon of the catchment area"
     )

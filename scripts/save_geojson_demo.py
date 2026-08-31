@@ -17,7 +17,7 @@ files = {
         "application/vnd.google-earth.kml+xml",
     )
 }
-response = httpx.post(url, files=files, timeout=120.0)
+response = httpx.post(url, files=files, timeout=300.0)
 response.raise_for_status()
 data = response.json()
 

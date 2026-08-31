@@ -27,17 +27,25 @@ Note on flow routing:
 
 import logging
 
+from pyproj import Transformer
 from shapely.geometry import mapping
 
 from src.catchment.candidates import find_candidates
 from src.catchment.metrics import assert_area_consistency, compute_metrics
 from src.catchment.polygonize import mask_to_polygon
+from src.catchment.water_exclusion import build_water_exclusion_mask
+from src.config import settings
 from src.dem.builder import build_dem, validate_dem
 from src.dem.conditioning import fill_sinks
 from src.dem.slope import compute_slope_deg
 from src.geometry.pointcloud import build_point_cloud
 from src.hydrology.watershed import delineate_catchment
-from src.schemas.response import AnalysisMetadata, AnalysisResult, CatchmentResult
+from src.schemas.response import (
+    AnalysisMetadata,
+    AnalysisResult,
+    CatchmentResult,
+    WaterExclusionMetadata,
+)
 from src.terrain.kml_source import KMLTerrainSource
 from src.terrain.validators import validate_contours, validate_file
 
@@ -112,12 +120,40 @@ class AnalysisService:
         slope = compute_slope_deg(filled_dem)
         _log.info("Sinks filled, slope computed")
 
+        # ── 6b. Build OSM water exclusion mask ────────────────────────────────
+        # Compute the WGS84 bounding box of the raw DEM so Overpass can query it.
+        # The DEM origin is the top-left corner in metric CRS; we compute the
+        # four corners and project them to WGS84 to get the tight bbox.
+        epsg = int(raw_dem.crs.split(":")[-1])
+        to_wgs = Transformer.from_crs(f"EPSG:{epsg}", "EPSG:4326", always_xy=True)
+        # origin_x, origin_y is the top-left corner of the DEM in metric coords.
+        x_min = raw_dem.origin_x
+        y_min = raw_dem.origin_y - raw_dem.rows * raw_dem.cell_size  # bottom edge
+        x_max = raw_dem.origin_x + raw_dem.cols * raw_dem.cell_size  # right edge
+        y_max = raw_dem.origin_y  # top edge
+        lon_min, lat_min = to_wgs.transform(x_min, y_min)
+        lon_max, lat_max = to_wgs.transform(x_max, y_max)
+        dem_bbox_wgs84 = (lat_min, lon_min, lat_max, lon_max)  # (S, W, N, E)
+
+        water_result = build_water_exclusion_mask(
+            dem=raw_dem,
+            dem_bbox_wgs84=dem_bbox_wgs84,
+            slope_deg=slope,
+            settings=settings,
+        )
+        _log.info(
+            "Water exclusion: source=%s features=%d masked_cells=%d",
+            water_result.source,
+            water_result.feature_count,
+            int(water_result.mask.sum()),
+        )
+
         # ── 7. Candidate identification + conditioned routing ─────────────────
         # find_candidates returns (candidates, conditioned_dem, flow_dir_cond,
         # flow_accum_cond). The conditioned routing outputs are the single source
         # of truth for ALL downstream steps — no separate routing pass needed.
         candidates, _cond_dem, flow_dir_cond, flow_accum_cond = find_candidates(
-            raw_dem, filled_dem
+            raw_dem, filled_dem, water_mask=water_result.mask
         )
         if not candidates:
             raise ValueError(
@@ -179,6 +215,11 @@ class AnalysisService:
                 dem_cell_size_m=raw_dem.cell_size,
                 crs_used=raw_dem.crs,
                 contour_count=len(contours),
+            ),
+            water_exclusion=WaterExclusionMetadata(
+                source=water_result.source,
+                excluded_feature_count=water_result.feature_count,
+                attribution=water_result.attribution,
             ),
         )
 

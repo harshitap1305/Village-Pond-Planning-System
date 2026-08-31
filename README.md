@@ -16,34 +16,38 @@ Built for the CSD Assignment — AI-based Village Pond Planning System.
 
 The system automates the highly manual civil engineering process of topographical surveying and hydrological analysis. The pipeline runs completely offline (except for an OSM exclusion check) in about 60 seconds:
 
-1. **Data Parsing & Coordinate Projection**
-   - Extracts vector contour lines from the uploaded KML/KMZ files.
-   - Automatically determines the correct UTM Zone and reprojects WGS84 (Lat/Lon) coordinates into a local metric Coordinate Reference System (CRS). This ensures all subsequent calculations (area, volume) are accurately measured in meters.
-   - Densifies the vector lines to generate a dense 3D point cloud.
+1. **Data Extraction & Coordinate Graphing**
+   - Parses the XML-based KML/KMZ files to extract contour elevation rings (LineStrings).
+   - Determines the correct local UTM Zone and transforms all WGS84 (Lat/Lon) coordinates into a metric Coordinate Reference System (CRS).
+   - Densifies the contour lines by adding vertices at regular 1-meter intervals, effectively building a dense 3D point cloud $(x, y, z)$.
 
-2. **DEM Generation (Interpolation)**
-   - Uses Inverse Distance Weighting (IDW) to interpolate the sparse point cloud into a continuous 2D raster grid (Digital Elevation Model).
+2. **Raster Grid (DEM) Generation via IDW**
+   - We divide the village area into a 2D matrix of discrete cells (e.g., $2m \times 2m$ spatial resolution).
+   - We use an **Inverse Distance Weighting (IDW)** algorithm backed by a KD-Tree spatial index. For each empty cell in the grid, the algorithm finds the $k$-nearest contour points and assigns an elevation weighted by the inverse of their distance. This creates a continuous Digital Elevation Model (DEM).
 
-3. **Hydrological Conditioning**
-   - Raw DEMs contain artificial "pits" or sinks that trap simulated water. The system uses a **Priority-Flood algorithm** to fill these depressions, creating a hydrologically conditioned DEM where water flows continuously toward the map edges.
+3. **Hydrological Conditioning (Priority-Flood Algorithm)**
+   - Natural, mathematically-interpolated DEMs contain artificial "pits" or sinks (cells surrounded by higher elevation cells) which trap simulated water flow.
+   - We run a **Priority-Flood algorithm** that simulates raising the water level in these pits until they spill over, ensuring that every cell in the DEM has a continuous downhill path to the edge of the map.
 
-4. **Flow Direction & Accumulation (D8 Algorithm)**
-   - Computes the steepest downhill slope for every cell to determine flow direction (`pysheds`).
-   - Calculates the upstream Flow Accumulation for every cell (how many cells flow into it). High accumulation pathways represent natural streams and valleys.
+4. **Flow Network Graphing (D8 Algorithm)**
+   - The terrain is modeled as a directed mathematical graph. Using the **D8 (Deterministic Eight-Node) Algorithm** via `pysheds`, every cell calculates the steepest downhill slope among its 8 immediate neighbors.
+   - Each cell points a directed edge to its steepest downhill neighbor, creating a network of flow pointers.
+   - We traverse this graph to compute **Flow Accumulation**: the total number of upstream cells that drain into any given cell. High-accumulation pathways mathematically represent rivers and valleys.
 
 5. **Existing Water Exclusion (OpenStreetMap)**
-   - Queries the main OpenStreetMap (OSM) API to download existing mapped rivers, streams, canals, and lakes as XML.
-   - Converts the XML nodes/ways into buffered Shapely polygons, rasterizes them, and builds a strict boolean exclusion mask to prevent building a pond on top of an existing river.
-   - Uses a fallback "flat-area heuristic" to exclude massive flat plains if the OSM network is down.
+   - To prevent the system from proposing a pond inside an existing river or lake, we query the main OpenStreetMap (OSM) API.
+   - The XML nodes and ways are parsed into Shapely polygons, buffered by a safety margin (e.g., $15m$ for rivers, $5m$ for lakes), and rasterized onto our DEM grid to create a boolean mask of "forbidden zones".
 
-6. **Candidate Scoring & Selection**
-   - Subtracts the conditioned DEM from the raw DEM to identify natural topographic depressions ("bowls").
-   - Calculates the exact water storage volume ($m^3$), depression area, and depth for every bowl.
-   - Ranks the candidates based on a weighted formula prioritizing large catchments, deep bowls, and high flow accumulation. Vetoes any candidate touching the OSM exclusion mask.
+6. **Pond Location Candidate Selection (Depression Analysis)**
+   - To find natural locations that hold water, we subtract the *raw DEM* from our *conditioned DEM*. Any cell where the elevation difference is $>0$ is part of a natural topographic depression ("bowl").
+   - We group contiguous depression cells together and calculate their exact volume ($m^3$), surface area, and max depth.
+   - **Candidate Scoring**: We evaluate each bowl's deepest point (the sink) based on a weighted formula: $Score = (normalized\_storage\_volume \times 0.6) + (normalized\_catchment\_area \times 0.4)$.
+   - We perform a hard veto, instantly discarding any candidate whose bowl geometry touches the OSM water exclusion mask.
 
-7. **Watershed Delineation**
-   - Takes the #1 ranked pond location (the "pour point") and performs an upstream Breadth-First Search (BFS) on the flow direction grid.
-   - Converts the resulting raster mask into a smoothed GeoJSON polygon representing the exact catchment area.
+7. **Watershed (Catchment) Delineation via BFS**
+   - Given the #1 ranked pond location (the "pour point"), we reverse the D8 flow direction graph.
+   - We execute a **Breadth-First Search (BFS)** starting from the pour point, walking upstream along all incoming flow pointers. Every visited cell is flagged as part of the catchment basin.
+   - The resulting raster mask of visited cells is polygonized, simplified (Douglas-Peucker algorithm), and converted into a GeoJSON format for the frontend map rendering.
 
 ## Technology Stack
 

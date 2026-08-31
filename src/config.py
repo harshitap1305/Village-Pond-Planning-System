@@ -60,6 +60,32 @@ class Settings(BaseSettings):
     # Reduces vertex count for smoother map rendering.
     polygon_simplify_tolerance_m: float = 1.0
 
+    # ── OSM API (Module 10 — Water Mask Update) ──────────────────────────────
+    # Using the primary OSM API for reliability (XML format).
+    osm_api_url: str = "https://api.openstreetmap.org/api/0.6/map"
+
+    # Timeout per individual OSM HTTP request (seconds).
+    osm_timeout_s: int = 15
+
+    # Safety buffer added around all water polygons/buffers in metres.
+    # Prevents pond candidates from being placed right on the water edge.
+    water_buffer_margin_m: float = 5.0
+
+    # Default half-widths (metres) for linear waterways that carry no width= tag.
+    # Source: OSM tagging guidelines + common survey values for rural India.
+    default_river_width_m: float = 15.0
+    default_stream_width_m: float = 3.0
+    default_canal_width_m: float = 8.0
+    default_drain_width_m: float = 1.5
+
+    # When True (default), streams, ditches, and drains also trigger a hard veto.
+    # Set False in config to allow check-dam style candidates on minor waterways.
+    veto_minor_waterways: bool = True
+
+    # In-memory Overpass response cache TTL (seconds). Water features are
+    # effectively static on the timescale of a planning run, so 24h is safe.
+    water_cache_ttl_s: int = 86400  # 24 h
+
 
 # Module-level singleton — import this everywhere instead of calling Settings().
 settings = Settings()

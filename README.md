@@ -12,6 +12,39 @@ Accepts KML/KMZ contour data for a village area and returns:
 
 Built for the CSD Assignment — AI-based Village Pond Planning System.
 
+## How it Works (Algorithm & Logic)
+
+The system automates the highly manual civil engineering process of topographical surveying and hydrological analysis. The pipeline runs completely offline (except for an OSM exclusion check) in about 60 seconds:
+
+1. **Data Parsing & Coordinate Projection**
+   - Extracts vector contour lines from the uploaded KML/KMZ files.
+   - Automatically determines the correct UTM Zone and reprojects WGS84 (Lat/Lon) coordinates into a local metric Coordinate Reference System (CRS). This ensures all subsequent calculations (area, volume) are accurately measured in meters.
+   - Densifies the vector lines to generate a dense 3D point cloud.
+
+2. **DEM Generation (Interpolation)**
+   - Uses Inverse Distance Weighting (IDW) to interpolate the sparse point cloud into a continuous 2D raster grid (Digital Elevation Model).
+
+3. **Hydrological Conditioning**
+   - Raw DEMs contain artificial "pits" or sinks that trap simulated water. The system uses a **Priority-Flood algorithm** to fill these depressions, creating a hydrologically conditioned DEM where water flows continuously toward the map edges.
+
+4. **Flow Direction & Accumulation (D8 Algorithm)**
+   - Computes the steepest downhill slope for every cell to determine flow direction (`pysheds`).
+   - Calculates the upstream Flow Accumulation for every cell (how many cells flow into it). High accumulation pathways represent natural streams and valleys.
+
+5. **Existing Water Exclusion (OpenStreetMap)**
+   - Queries the main OpenStreetMap (OSM) API to download existing mapped rivers, streams, canals, and lakes as XML.
+   - Converts the XML nodes/ways into buffered Shapely polygons, rasterizes them, and builds a strict boolean exclusion mask to prevent building a pond on top of an existing river.
+   - Uses a fallback "flat-area heuristic" to exclude massive flat plains if the OSM network is down.
+
+6. **Candidate Scoring & Selection**
+   - Subtracts the conditioned DEM from the raw DEM to identify natural topographic depressions ("bowls").
+   - Calculates the exact water storage volume ($m^3$), depression area, and depth for every bowl.
+   - Ranks the candidates based on a weighted formula prioritizing large catchments, deep bowls, and high flow accumulation. Vetoes any candidate touching the OSM exclusion mask.
+
+7. **Watershed Delineation**
+   - Takes the #1 ranked pond location (the "pour point") and performs an upstream Breadth-First Search (BFS) on the flow direction grid.
+   - Converts the resulting raster mask into a smoothed GeoJSON polygon representing the exact catchment area.
+
 ## Technology Stack
 
 - **Backend**: Python 3.12 · FastAPI · uvicorn

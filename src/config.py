@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     # ── API ──────────────────────────────────────────────────────────────────
     api_title: str = "Village Pond Planning API"
     api_version: str = "0.1.0"
+    port: int = 8000
 
     # ── File Upload Limits ────────────────────────────────────────────────────
     max_upload_mb: int = 20

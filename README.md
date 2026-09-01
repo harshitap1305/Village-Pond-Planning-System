@@ -114,7 +114,7 @@ pytest --cov=src --cov-report=term-missing
 
 ```bash
 # Example curl request to analyze a KML file
-curl -F "file=@tests/fixtures/contours_1m.kml" http://localhost:8000/analyzeContour
+curl -F "contour_map=@tests/fixtures/contours_1m.kml" http://localhost:8000/analyzeContour
 ```
 
 ## Project Structure

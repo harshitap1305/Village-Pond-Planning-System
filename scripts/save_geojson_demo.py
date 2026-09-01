@@ -11,7 +11,7 @@ from src.terrain.kml_source import KMLTerrainSource
 print("Sending KML to local API (this takes ~60s)...")
 url = "http://localhost:8000/analyzeContour"
 files = {
-    "file": (
+    "contour_map": (
         "contours_1m.kml",
         open("tests/fixtures/contours_1m.kml", "rb"),
         "application/vnd.google-earth.kml+xml",

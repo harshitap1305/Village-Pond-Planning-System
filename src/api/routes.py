@@ -36,13 +36,13 @@ async def health_check():
 )
 async def analyze_contour(
     request: Request,
-    file: UploadFile,
+    contour_map: UploadFile,
     cell_size: float | None = None,
 ) -> AnalysisResult:
     """
     Run the full village pond analysis pipeline.
 
-    - **file**: KML or KMZ file containing elevation contour lines.
+    - **contour_map**: KML or KMZ file containing elevation contour lines.
     - **cell_size**: Optional DEM grid resolution override in metres (default: 2.0 m).
     """
     # Reject oversized files before reading content into memory
@@ -55,11 +55,11 @@ async def analyze_contour(
                 f"exceeds the {settings.max_upload_mb}MB upload limit."
             )
 
-    contents = await file.read()
+    contents = await contour_map.read()
     result = await run_in_threadpool(
         analysis_service.run,
         contents,
-        file.filename or "upload.kml",
+        contour_map.filename or "upload.kml",
         cell_size,
     )
     return result

@@ -16,7 +16,11 @@ def test_analyze_contour_success():
         response = client.post(
             "/analyzeContour",
             files={
-                "file": ("contours_1m.kml", f, "application/vnd.google-earth.kml+xml")
+                "contour_map": (
+                    "contours_1m.kml",
+                    f,
+                    "application/vnd.google-earth.kml+xml",
+                )
             },
         )
     assert response.status_code == 200
@@ -32,8 +36,8 @@ def test_analyze_contour_bad_xml_returns_400():
     response = client.post(
         "/analyzeContour",
         files={
-            "file": (
-                "bad.kml",
+            "contour_map": (
+                "broken.kmz",
                 b"not xml at all",
                 "application/vnd.google-earth.kml+xml",
             )
@@ -45,6 +49,6 @@ def test_analyze_contour_bad_xml_returns_400():
 def test_analyze_contour_wrong_extension_returns_415():
     response = client.post(
         "/analyzeContour",
-        files={"file": ("data.csv", b"a,b,c", "text/csv")},
+        files={"contour_map": ("data.csv", b"a,b,c", "text/csv")},
     )
     assert response.status_code == 415

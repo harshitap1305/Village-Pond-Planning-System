@@ -44,6 +44,8 @@ def find_candidates(
     raw_dem: DEM,
     filled_dem: DEM,
     water_mask: np.ndarray | None = None,
+    land_mask: np.ndarray | None = None,
+    slope_deg: np.ndarray | None = None,
 ) -> tuple[List[CandidatePoint], DEM, np.ndarray, np.ndarray]:
     """
     Identify pond candidate locations via the depression-based method.
@@ -55,6 +57,22 @@ def find_candidates(
                     any depression that overlaps a True cell is hard-vetoed
                     and never returned as a candidate. Pass the output of
                     :func:`src.catchment.water_exclusion.build_water_exclusion_mask`.
+        land_mask:  Optional boolean array (same shape as DEM). When provided,
+                    any depression whose bowl footprint overlaps a True cell is
+                    hard-vetoed. Represents built-up land (buildings, residential
+                    landuse) that is structurally incompatible with excavation.
+                    Built-up cells in the upstream *catchment* are NOT checked
+                    here — only the bowl footprint itself.
+                    Pass the output of
+                    :func:`src.catchment.land_exclusion.build_land_exclusion_mask`.
+        slope_deg:  Optional float32 array of terrain slope in degrees (same
+                    shape as DEM). When provided, any depression whose boundary
+                    ring (dam wall site) has a maximum slope exceeding
+                    ``settings.max_dam_site_slope_deg`` is hard-vetoed. The
+                    bowl interior slope is not checked — only the rim ring that
+                    would seat the earthen embankment.
+                    Pass the output of
+                    :func:`src.dem.slope.compute_slope_deg`.
 
     Returns:
         A 4-tuple of:
@@ -111,6 +129,41 @@ def find_candidates(
                 int((water_mask & bowl_mask).sum()),
             )
             continue
+
+        # Hard veto: bowl footprint overlaps mapped built-up land.
+        # We check only the BOWL FOOTPRINT cells, NOT the rim or the upstream
+        # catchment. Built-up land in the catchment is acceptable — it still
+        # contributes runoff (with a higher runoff coefficient) and does not
+        # physically prevent pond construction at the bowl location.
+        if land_mask is not None and (land_mask & bowl_mask).any():
+            _log.debug(
+                "Bowl %d vetoed — overlaps built-up land mask (%d cells)",
+                bowl_id,
+                int((land_mask & bowl_mask).sum()),
+            )
+            continue
+
+        # Engineering veto: dam-wall (boundary ring) must not be on impractically
+        # steep terrain. A steep rim means we cannot seat a stable earthen
+        # embankment — earth cannot be compacted reliably above ~20° without
+        # specialist equipment unavailable in rural contexts.
+        # IS 12169 allows a 2:1 H:V downstream slope (≈ 26.6°); 20° is used
+        # here as a conservative threshold with headroom for fill material.
+        # We check the BOUNDARY RING cells only — the bowl interior can be
+        # any shape; only the embankment footprint matters here.
+        if slope_deg is not None:
+            boundary_ring = (
+                binary_dilation(bowl_mask, structure=np.ones((3, 3))) & ~bowl_mask
+            )
+            rim_slope_max = float(slope_deg[boundary_ring].max())
+            if rim_slope_max > settings.max_dam_site_slope_deg:
+                _log.debug(
+                    "Bowl %d vetoed — rim slope %.1f° exceeds max_dam_site_slope_deg %.1f°",
+                    bowl_id,
+                    rim_slope_max,
+                    settings.max_dam_site_slope_deg,
+                )
+                continue
 
         surviving_ids.append(bowl_id)
 

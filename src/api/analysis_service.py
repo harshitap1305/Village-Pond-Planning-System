@@ -31,6 +31,7 @@ from pyproj import Transformer
 from shapely.geometry import mapping
 
 from src.catchment.candidates import find_candidates
+from src.catchment.land_exclusion import build_land_exclusion_mask
 from src.catchment.metrics import assert_area_consistency, compute_metrics
 from src.catchment.polygonize import mask_to_polygon
 from src.catchment.water_exclusion import build_water_exclusion_mask
@@ -44,6 +45,7 @@ from src.schemas.response import (
     AnalysisMetadata,
     AnalysisResult,
     CatchmentResult,
+    LandExclusionMetadata,
     WaterExclusionMetadata,
 )
 from src.terrain.kml_source import KMLTerrainSource
@@ -148,12 +150,35 @@ class AnalysisService:
             int(water_result.mask.sum()),
         )
 
+        # ── 6c. Build OSM built-up land exclusion mask ────────────────────────
+        # Reuses the same OSM XML already cached by step 6b above — no new
+        # HTTP call is made. The mask covers building footprints and residential/
+        # commercial/industrial landuse polygons.
+        # Applied only to the BOWL FOOTPRINT in find_candidates, NOT to the
+        # upstream catchment — built-up land there is acceptable and even
+        # increases the runoff coefficient.
+        land_result = build_land_exclusion_mask(
+            dem=raw_dem,
+            dem_bbox_wgs84=dem_bbox_wgs84,
+            settings=settings,
+        )
+        _log.info(
+            "Land exclusion: source=%s features=%d masked_cells=%d",
+            land_result.source,
+            land_result.feature_count,
+            int(land_result.mask.sum()),
+        )
+
         # ── 7. Candidate identification + conditioned routing ─────────────────
         # find_candidates returns (candidates, conditioned_dem, flow_dir_cond,
         # flow_accum_cond). The conditioned routing outputs are the single source
         # of truth for ALL downstream steps — no separate routing pass needed.
         candidates, _cond_dem, flow_dir_cond, flow_accum_cond = find_candidates(
-            raw_dem, filled_dem, water_mask=water_result.mask
+            raw_dem,
+            filled_dem,
+            water_mask=water_result.mask,
+            land_mask=land_result.mask,
+            slope_deg=slope,
         )
         if not candidates:
             raise ValueError(
@@ -220,6 +245,12 @@ class AnalysisService:
                 source=water_result.source,
                 excluded_feature_count=water_result.feature_count,
                 attribution=water_result.attribution,
+            ),
+            land_exclusion=LandExclusionMetadata(
+                source=land_result.source,
+                excluded_feature_count=land_result.feature_count,
+                builtup_cells_masked=int(land_result.mask.sum()),
+                attribution=land_result.attribution,
             ),
         )
 

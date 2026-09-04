@@ -34,6 +34,7 @@ from src.catchment.candidates import find_candidates
 from src.catchment.land_exclusion import build_land_exclusion_mask
 from src.catchment.metrics import assert_area_consistency, compute_metrics
 from src.catchment.polygonize import mask_to_polygon
+from src.catchment.rainfall_service import build_rainfall_stats
 from src.catchment.water_exclusion import build_water_exclusion_mask
 from src.config import settings
 from src.dem.builder import build_dem, validate_dem
@@ -195,6 +196,15 @@ class AnalysisService:
             selected.score,
         )
 
+        # ── 7b. Rainfall data for selected location ───────────────────────────
+        # Called AFTER candidate selection — we need the lat/lon of the winning site.
+        # Fail-open: if both APIs unavailable, rainfall=None, rest of pipeline unaffected.
+        rainfall_stats = build_rainfall_stats(
+            lat=selected.lat,
+            lon=selected.lon,
+            settings=settings,
+        )
+
         # ── 8 & 9. Watershed delineation & Polygonization for all candidates ──
         for cand in candidates:
             cand_mask = delineate_catchment(
@@ -252,6 +262,7 @@ class AnalysisService:
                 builtup_cells_masked=int(land_result.mask.sum()),
                 attribution=land_result.attribution,
             ),
+            rainfall=rainfall_stats,
         )
 
 

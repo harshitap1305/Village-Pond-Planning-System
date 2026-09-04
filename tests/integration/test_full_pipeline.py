@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,21 +10,32 @@ from src.api.analysis_service import analysis_service
 FIXTURE = Path("tests/fixtures/contours_1m.kml")
 
 # ---------------------------------------------------------------------------
-# OSM API mock — integration tests must not hit a live server.
-# We return an empty elements XML, which means the water exclusion mask will
-# be all-False (no features to exclude), and the pipeline continues normally.
-# The water_exclusion.source will be "osm" with feature_count=0.
+# API mocks — integration tests must not hit live servers.
 # ---------------------------------------------------------------------------
 _EMPTY_OSM = '<?xml version="1.0" encoding="UTF-8"?><osm version="0.6"></osm>'
+_MOCK_RAINFALL = json.dumps(
+    {
+        "daily": {
+            "time": ["2023-07-15", "2023-11-15"],
+            "precipitation_sum": [150.0, 10.0],
+        }
+    }
+)
 
 
 @pytest.fixture(scope="module")
 def pipeline_result():
     """Run the full pipeline once per module — expensive (~60s).
-    OSM API is mocked so the test is self-contained and offline."""
-    with patch(
-        "src.catchment.water_exclusion.OsmApiClient.query_water_features",
-        return_value=_EMPTY_OSM,
+    External APIs are mocked so the test is self-contained and offline."""
+    with (
+        patch(
+            "src.catchment.water_exclusion.OsmApiClient.query_water_features",
+            return_value=_EMPTY_OSM,
+        ),
+        patch(
+            "src.catchment.rainfall_service.OpenMeteoClient.get_daily_rainfall",
+            return_value=_MOCK_RAINFALL,
+        ),
     ):
         return analysis_service.run(FIXTURE.read_bytes(), "contours_1m.kml")
 
@@ -104,14 +116,30 @@ class TestFullPipeline:
         assert pipeline_result.land_exclusion.excluded_feature_count == 0
         assert pipeline_result.land_exclusion.builtup_cells_masked == 0
 
+    def test_rainfall_stats_present(self, pipeline_result):
+        """rainfall block must be present and correctly populated by the mock."""
+        rf = pipeline_result.rainfall
+        assert rf is not None
+        assert rf.source == "open_meteo_era5_land"
+        assert rf.annual_avg_mm == 160.0
+        assert rf.wet_season_avg_mm == 150.0
+        assert rf.dry_season_avg_mm == 10.0
+
     def test_idempotency(self):
         kml = FIXTURE.read_bytes()
-        with patch(
-            "src.catchment.water_exclusion.OsmApiClient.query_water_features",
-            return_value=_EMPTY_OSM,
+        with (
+            patch(
+                "src.catchment.water_exclusion.OsmApiClient.query_water_features",
+                return_value=_EMPTY_OSM,
+            ),
+            patch(
+                "src.catchment.rainfall_service.OpenMeteoClient.get_daily_rainfall",
+                return_value=_MOCK_RAINFALL,
+            ),
         ):
             r1 = analysis_service.run(kml, "contours_1m.kml")
             r2 = analysis_service.run(kml, "contours_1m.kml")
         assert r1.candidate_locations == r2.candidate_locations
         assert r1.catchment.area_ha == r2.catchment.area_ha
         assert r1.catchment.polygon_geojson == r2.catchment.polygon_geojson
+        assert r1.rainfall.annual_avg_mm == r2.rainfall.annual_avg_mm

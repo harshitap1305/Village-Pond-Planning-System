@@ -89,6 +89,21 @@ class TestFullPipeline:
         """The mock returns a successful (empty) Overpass response — source must be osm."""
         assert pipeline_result.water_exclusion.source == "osm"
 
+    def test_land_exclusion_metadata_present(self, pipeline_result):
+        """land_exclusion block must always be present in the response."""
+        le = pipeline_result.land_exclusion
+        assert le.source in {"osm", "unavailable"}
+        assert le.excluded_feature_count >= 0
+        assert le.builtup_cells_masked >= 0
+        assert "OpenStreetMap" in le.attribution
+
+    def test_land_exclusion_source_is_osm(self, pipeline_result):
+        """The mock XML is cached by water_exclusion — land_exclusion must reuse it.
+        Empty XML means feature_count=0 and builtup_cells_masked=0, source=osm."""
+        assert pipeline_result.land_exclusion.source == "osm"
+        assert pipeline_result.land_exclusion.excluded_feature_count == 0
+        assert pipeline_result.land_exclusion.builtup_cells_masked == 0
+
     def test_idempotency(self):
         kml = FIXTURE.read_bytes()
         with patch(

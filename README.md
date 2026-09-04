@@ -140,7 +140,6 @@ docs/
 ## Architecture
 
 See [docs/architecture.md](docs/architecture.md) for the full system design.
-See [docs/submission_report.md](docs/submission_report.md) for the detailed project report.
 
 ## API Endpoints
 

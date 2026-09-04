@@ -69,6 +69,32 @@ class WaterExclusionMetadata(BaseModel):
     attribution: str
 
 
+class LandExclusionMetadata(BaseModel):
+    """
+    Metadata about the OSM built-up land exclusion layer applied in this run.
+
+    Parsed from the same OSM XML blob as the water exclusion layer — no
+    additional Overpass call is made.
+
+    Attributes:
+        source:                 How the mask was produced.
+                                ``"osm"``         — live OSM data parsed OK.
+                                ``"unavailable"``  — XML absent or parse failed;
+                                                    all-False mask used (fail-open).
+        excluded_feature_count: Number of distinct OSM built-up polygon features
+                                found in the bounding box. 0 when no features exist
+                                or when source is ``"unavailable"``.
+        builtup_cells_masked:   Number of DEM cells classified as built-up land.
+                                0 when no features were found.
+        attribution:            Required ODbL credit string for OSM data.
+    """
+
+    source: str
+    excluded_feature_count: int
+    builtup_cells_masked: int
+    attribution: str
+
+
 class AnalysisResult(BaseModel):
     """
     Top-level response for POST /analyzeContour.
@@ -86,3 +112,4 @@ class AnalysisResult(BaseModel):
     catchment: CatchmentResult
     metadata: AnalysisMetadata
     water_exclusion: WaterExclusionMetadata
+    land_exclusion: LandExclusionMetadata

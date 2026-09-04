@@ -87,6 +87,24 @@ class Settings(BaseSettings):
     # effectively static on the timescale of a planning run, so 24h is safe.
     water_cache_ttl_s: int = 86400  # 24 h
 
+    # ── Land Suitability (Module 1 — Phase 3) ────────────────────────────────
+    # Maximum terrain slope (degrees) permitted at the depression rim / dam-wall
+    # site. Earthen embankments require stable, relatively flat ground to seat
+    # and compact properly. Above this threshold, construction is impractical.
+    # Basis: IS 12169 downstream slope ≈ 2:1 H:V = 26.6°; 20° is conservative
+    # and leaves headroom for fill material placement.
+    # Set to 90.0 to disable this filter entirely.
+    max_dam_site_slope_deg: float = 20.0
+
+    # Safety buffer (metres) added around built-up land polygons when building
+    # the exclusion mask. Prevents pond siting immediately adjacent to a building
+    # foundation where ground disturbance would affect the structure.
+    builtup_buffer_margin_m: float = 10.0
+
+    # In-memory cache TTL for built-up land exclusion data (seconds).
+    # Same value as water_cache_ttl_s — both come from the same OSM XML blob.
+    land_cache_ttl_s: int = 86400  # 24 h
+
 
 # Module-level singleton — import this everywhere instead of calling Settings().
 settings = Settings()

@@ -1,5 +1,5 @@
 """
-Parse an Overpass API JSON response into Shapely geometries, then reproject
+Parse an Overpass API XML response into Shapely geometries, then reproject
 and buffer them into the DEM's metric CRS for rasterization.
 
 Two geometry families from OSM water tagging:
@@ -12,6 +12,13 @@ Two geometry families from OSM water tagging:
                     These come as open ways (LineStrings). They need to be
                     buffered by (half the waterway width + safety margin) to
                     create an exclusion polygon.
+
+Built-up land extraction (for land suitability):
+
+  Area features  — ``building=*``, ``landuse=residential|commercial|industrial|
+                    construction|cemetery``
+                    These are polygon ways. They are returned as-is (no buffering
+                    at parse time — caller applies builtup_buffer_margin_m).
 """
 
 import logging
@@ -117,6 +124,124 @@ def build_water_geometries(
 
     _log.debug(
         "Extracted %d water geometries from OSM XML",
+        len(results),
+    )
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Built-up land extraction (for land suitability exclusion — Module 1)
+# ---------------------------------------------------------------------------
+
+# Tags whose closed-way (polygon) forms mark non-excavatable built-up land.
+# Values are matched as follows:
+#   ("building", None) — match ANY non-empty value (house, yes, school, ...)
+#   ("landuse", "residential") — match the exact value
+_BUILTUP_POLYGON_TAGS: list[tuple[str, str | None]] = [
+    ("building", None),  # any building footprint polygon
+    ("landuse", "residential"),
+    ("landuse", "commercial"),
+    ("landuse", "industrial"),
+    ("landuse", "construction"),
+    ("landuse", "cemetery"),  # culturally incompatible in rural India
+]
+
+
+def build_builtup_geometries(osm_xml: str) -> list[Polygon]:
+    """
+    Extract WGS84 Shapely polygons for built-up / non-excavatable land.
+
+    Parses the **same OSM XML blob** already fetched for water features —
+    no additional HTTP call is made. The function is deliberately independent
+    of ``build_water_geometries``; it can be called even if that function
+    returned no results.
+
+    OSM tags matched (polygon closed ways only):
+      - ``building=*``           (any non-empty value)
+      - ``landuse=residential``
+      - ``landuse=commercial``
+      - ``landuse=industrial``
+      - ``landuse=construction``
+      - ``landuse=cemetery``
+
+    Linear ways with the above tags are ignored (rare and non-meaningful for
+    footprint exclusion purposes).
+
+    Args:
+        osm_xml: Raw OSM API XML string (``<osm version="0.6">...</osm>``).
+
+    Returns:
+        List of WGS84 :class:`~shapely.geometry.Polygon` objects.
+        Returns an empty list on XML parse error or when no matching features
+        exist in the bounding box (fail-open: no exclusion applied).
+    """
+    results: list[Polygon] = []
+
+    try:
+        root = ET.fromstring(osm_xml)
+    except ET.ParseError as exc:
+        _log.error("Failed to parse OSM XML for built-up geometries: %s", exc)
+        return results
+
+    # 1. Build node dictionary: id -> (lon, lat)
+    nodes: dict[str, tuple[float, float]] = {}
+    for node in root.findall("node"):
+        try:
+            nodes[node.attrib["id"]] = (
+                float(node.attrib["lon"]),
+                float(node.attrib["lat"]),
+            )
+        except (KeyError, ValueError):
+            continue
+
+    # 2. Iterate ways and extract built-up polygon features
+    for way in root.findall("way"):
+        tags = {
+            tag.attrib["k"]: tag.attrib["v"]
+            for tag in way.findall("tag")
+            if "k" in tag.attrib and "v" in tag.attrib
+        }
+
+        # Check if this way matches any built-up exclusion tag
+        matched = False
+        for osm_key, osm_value in _BUILTUP_POLYGON_TAGS:
+            tag_val = tags.get(osm_key)
+            if tag_val is None:
+                continue
+            # osm_value is None → match any non-empty value (e.g., building=*)
+            # but ignore explicit negations like "no" or "false"
+            if osm_value is None:
+                if tag_val.lower() not in ("no", "false"):
+                    matched = True
+                    break
+            elif tag_val == osm_value:
+                matched = True
+                break
+
+        if not matched:
+            continue
+
+        # Collect coordinates for this way
+        coords = []
+        for nd in way.findall("nd"):
+            ref = nd.attrib.get("ref")
+            if ref in nodes:
+                coords.append(nodes[ref])
+
+        # Need at least 3 distinct points to form a valid polygon
+        if len(coords) < 3:
+            continue
+
+        # Ensure the ring is closed
+        if coords[0] != coords[-1]:
+            coords.append(coords[0])
+
+        poly = Polygon(coords)
+        if poly.is_valid and not poly.is_empty:
+            results.append(poly)
+
+    _log.debug(
+        "Extracted %d built-up land polygons from OSM XML",
         len(results),
     )
     return results

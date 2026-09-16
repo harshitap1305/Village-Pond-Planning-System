@@ -16,8 +16,12 @@ _EMPTY_OSM = '<?xml version="1.0" encoding="UTF-8"?><osm version="0.6"></osm>'
 _MOCK_RAINFALL = json.dumps(
     {
         "daily": {
-            "time": ["2023-07-15", "2023-11-15"],
-            "precipitation_sum": [150.0, 10.0],
+            # Jul: 800mm total → daily avg 25.8mm > Ia=20.76mm (CN=71) → produces runoff
+            # Aug: 750mm total → daily avg 24.2mm > Ia → produces runoff
+            # Nov: 10mm total  → daily avg 0.33mm < Ia → zero runoff
+            # This gives annual_avg_mm=1560, wet_season=1550, dry_season=10
+            "time": ["2023-07-15", "2023-08-15", "2023-11-15"],
+            "precipitation_sum": [800.0, 750.0, 10.0],
         }
     }
 )
@@ -121,9 +125,25 @@ class TestFullPipeline:
         rf = pipeline_result.rainfall
         assert rf is not None
         assert rf.source == "open_meteo_era5_land"
-        assert rf.annual_avg_mm == 160.0
-        assert rf.wet_season_avg_mm == 150.0
+        # Mock: Jul=800mm, Aug=750mm, Nov=10mm → annual=1560, wet=1550, dry=10
+        assert rf.annual_avg_mm == 1560.0
+        assert rf.wet_season_avg_mm == 1550.0
         assert rf.dry_season_avg_mm == 10.0
+
+    def test_runoff_estimate_present(self, pipeline_result):
+        """runoff block must be present when rainfall data is available."""
+        ru = pipeline_result.runoff
+        assert ru is not None
+
+    def test_runoff_annual_volume_positive(self, pipeline_result):
+        """Annual runoff volume must be > 0 when rainfall is non-zero."""
+        assert pipeline_result.runoff.annual_avg_m3 > 0.0
+
+    def test_runoff_method_and_cn_populated(self, pipeline_result):
+        """method and curve_number must be set to valid values."""
+        ru = pipeline_result.runoff
+        assert ru.method in {"scs_cn_monthly_distributed", "rational_annual_fallback"}
+        assert 0 < ru.curve_number <= 100
 
     def test_idempotency(self):
         kml = FIXTURE.read_bytes()
@@ -143,3 +163,4 @@ class TestFullPipeline:
         assert r1.catchment.area_ha == r2.catchment.area_ha
         assert r1.catchment.polygon_geojson == r2.catchment.polygon_geojson
         assert r1.rainfall.annual_avg_mm == r2.rainfall.annual_avg_mm
+        assert r1.runoff.annual_avg_m3 == r2.runoff.annual_avg_m3

@@ -41,6 +41,7 @@ from src.dem.builder import build_dem, validate_dem
 from src.dem.conditioning import fill_sinks
 from src.dem.slope import compute_slope_deg
 from src.geometry.pointcloud import build_point_cloud
+from src.hydrology.runoff import RunoffEstimate, estimate_runoff
 from src.hydrology.watershed import delineate_catchment
 from src.schemas.response import (
     AnalysisMetadata,
@@ -205,6 +206,30 @@ class AnalysisService:
             settings=settings,
         )
 
+        # ── 7c. Runoff estimation for selected catchment ──────────────────────
+        # Applies SCS-CN method to the 10-year monthly rainfall from Step 7b.
+        # builtup_fraction comes from the Module 1 land mask (already computed).
+        # Fail-open: None if rainfall_stats is unavailable.
+        runoff_estimate: RunoffEstimate | None = None
+        if rainfall_stats is not None:
+            builtup_fraction = (
+                float(land_result.mask.sum()) / float(land_result.mask.size)
+                if land_result.mask.size > 0
+                else 0.0
+            )
+            try:
+                runoff_estimate = estimate_runoff(
+                    catchment_area_ha=selected.catchment_area_ha,
+                    rainfall_stats=rainfall_stats,
+                    builtup_fraction=builtup_fraction,
+                    hsg=settings.default_hsg,
+                    runoff_coefficient_fallback=settings.runoff_coefficient_fallback,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log.warning(
+                    "Runoff estimation failed (%s) — runoff will be null.", exc
+                )
+
         # ── 8 & 9. Watershed delineation & Polygonization for all candidates ──
         for cand in candidates:
             cand_mask = delineate_catchment(
@@ -263,6 +288,7 @@ class AnalysisService:
                 attribution=land_result.attribution,
             ),
             rainfall=rainfall_stats,
+            runoff=runoff_estimate,
         )
 
 

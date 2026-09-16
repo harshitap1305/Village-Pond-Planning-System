@@ -127,6 +127,21 @@ class Settings(BaseSettings):
     # historical reanalysis data doesn't change between requests.
     rainfall_cache_ttl_s: int = 86400  # 24 h
 
+    # ── Runoff Estimation (Module 3 — Phase 3) ───────────────────────────────
+    # Default Hydrologic Soil Group for ungauged catchments.
+    # "B" = moderately well-drained; typical for Deccan basalt, laterite, and
+    # Indo-Gangetic alluvium — the dominant soil parent material at most Indian
+    # village sites. Override to "C" or "D" in .env for black-cotton / clay-rich
+    # catchments, or "A" for sandy / well-drained terrain.
+    # Reference: USDA NEH Part 630 Ch. 7 + NRSC/ISRO IMSD watershed guidelines.
+    default_hsg: str = "B"
+
+    # Fallback annual runoff coefficient used when monthly rainfall data is
+    # unavailable (degrades gracefully from SCS-CN → simple C×P×A).
+    # 0.30 = conservative estimate for mixed agriculture, Group B soil.
+    # IS 5477 Part 1 recommends 0.25–0.40 for similar terrain.
+    runoff_coefficient_fallback: float = 0.30
+
 
 # Module-level singleton — import this everywhere instead of calling Settings().
 settings = Settings()

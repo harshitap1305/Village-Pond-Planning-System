@@ -34,6 +34,7 @@ from src.catchment.candidates import find_candidates
 from src.catchment.land_exclusion import build_land_exclusion_mask
 from src.catchment.metrics import assert_area_consistency, compute_metrics
 from src.catchment.polygonize import mask_to_polygon
+from src.catchment.pond_design import PondDesign, recommend_pond_design
 from src.catchment.rainfall_service import build_rainfall_stats
 from src.catchment.water_exclusion import build_water_exclusion_mask
 from src.config import settings
@@ -230,6 +231,22 @@ class AnalysisService:
                     "Runoff estimation failed (%s) — runoff will be null.", exc
                 )
 
+        # ── 7d. Pond dimensioning ────────────────────────────────────────
+        # Reconciles hydrological supply (Module 3) with topographic capacity
+        # (Phase 2) to recommend physical pond dimensions.
+        # Fail-open: None if runoff_estimate is unavailable.
+        pond_design: PondDesign | None = None
+        if runoff_estimate is not None:
+            try:
+                pond_design = recommend_pond_design(
+                    runoff_estimate=runoff_estimate,
+                    topographic_storage_m3=selected.estimated_storage_m3,
+                    depression_area_ha=selected.depression_area_ha,
+                    settings=settings,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("Pond design failed (%s) — pond_design will be null.", exc)
+
         # ── 8 & 9. Watershed delineation & Polygonization for all candidates ──
         for cand in candidates:
             cand_mask = delineate_catchment(
@@ -289,6 +306,7 @@ class AnalysisService:
             ),
             rainfall=rainfall_stats,
             runoff=runoff_estimate,
+            pond_design=pond_design,
         )
 
 

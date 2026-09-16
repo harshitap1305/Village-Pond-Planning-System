@@ -142,6 +142,52 @@ class Settings(BaseSettings):
     # IS 5477 Part 1 recommends 0.25–0.40 for similar terrain.
     runoff_coefficient_fallback: float = 0.30
 
+    # ── Pond Dimensioning (Module 4 — Phase 3) ───────────────────────────────
+    # Fraction of annual runoff volume targeted for capture.
+    # Basis: IS 5477 guidance for village-scale water harvesting; 40% is the
+    # standard planning value that balances construction cost against benefit.
+    # Remaining 60% accounts for inter-annual variability and downstream flow.
+    target_capture_fraction: float = 0.40
+
+    # Allowable water depth range (m). From NABARD farm pond guidelines and
+    # MGNREGS model estimates:
+    #   Min 1.5m: prevents rapid drying, reduces mosquito-breeding flat margins.
+    #   Max 4.0m: safety limit for unlined earthen embankments (IS 12169).
+    min_pond_depth_m: float = 1.5
+    max_pond_depth_m: float = 4.0
+
+    # Freeboard above full supply level (m).
+    # IS 5477 Part 4 + MOEF farm pond guidelines: 0.3–0.5m for village ponds.
+    # 0.5m is the conservative (upper) choice used here.
+    freeboard_m: float = 0.5
+
+    # Dead storage as a fraction of gross storage (IS 5477 Part 2).
+    # Allocated to accumulate silt over the design life (50 years typical).
+    # 10% is the standard for small village ponds in India.
+    dead_storage_fraction: float = 0.10
+
+    # Annual evaporation loss as a fraction of gross storage volume.
+    # Basis: Central Water Commission (CWC) data — 1000–2000mm/yr for central
+    # India; combined with typical shallow pond SA/volume ratio gives ~15%.
+    evaporation_loss_fraction: float = 0.15
+
+    # Annual seepage loss as a fraction of gross storage (unlined pond).
+    # IS 5477 allowance + NABARD guideline for clay-loam unlined farm ponds.
+    # Set to 0.005 (0.5%) in .env if the pond will be HDPE-lined.
+    seepage_loss_fraction: float = 0.10
+
+    # Bowl shape factor (form factor) for volume–depth back-calculation.
+    # 0.4 = between a perfect cone (0.33) and a flat cylinder (1.0).
+    # Validated against the prismoidal formula (h/3 × (A1 + A2 + √(A1×A2)))
+    # with A_bottom ≈ 0.3 × A_top, typical of natural depression bowls.
+    # Reference: NABARD farm pond design guide, Table 4.
+    pond_shape_factor: float = 0.40
+
+    # Standard earthen embankment top width (m).
+    # IS 12169 / NABARD: 1.0–2.0m for earthen dams < 10m height.
+    # 1.5m is the practical default for small village ponds.
+    embankment_top_width_m: float = 1.5
+
 
 # Module-level singleton — import this everywhere instead of calling Settings().
 settings = Settings()

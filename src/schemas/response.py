@@ -9,6 +9,7 @@ from typing import Any, Dict, List
 
 from pydantic import BaseModel
 
+from src.catchment.pond_design import PondDesign
 from src.hydrology.rainfall_stats import RainfallStats
 from src.hydrology.runoff import RunoffEstimate
 from src.schemas.catchment import CandidatePoint
@@ -117,3 +118,4 @@ class AnalysisResult(BaseModel):
     land_exclusion: LandExclusionMetadata
     rainfall: RainfallStats | None = None
     runoff: RunoffEstimate | None = None
+    pond_design: PondDesign | None = None

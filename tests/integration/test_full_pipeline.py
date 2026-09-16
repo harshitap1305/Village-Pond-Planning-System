@@ -145,6 +145,25 @@ class TestFullPipeline:
         assert ru.method in {"scs_cn_monthly_distributed", "rational_annual_fallback"}
         assert 0 < ru.curve_number <= 100
 
+    def test_pond_design_present(self, pipeline_result):
+        """pond_design block must be present when runoff data is available."""
+        assert pipeline_result.pond_design is not None
+
+    def test_pond_design_depth_in_valid_range(self, pipeline_result):
+        """Recommended water depth must be within the [1.5m, 4.0m] engineering range."""
+        pd = pipeline_result.pond_design
+        assert 1.5 <= pd.water_depth_m <= 4.0
+
+    def test_pond_design_constrained_by_populated(self, pipeline_result):
+        """constrained_by must be one of the four known values."""
+        pd = pipeline_result.pond_design
+        assert pd.constrained_by in {
+            "hydrology",
+            "topography",
+            "depth_min",
+            "depth_max",
+        }
+
     def test_idempotency(self):
         kml = FIXTURE.read_bytes()
         with (
@@ -164,3 +183,4 @@ class TestFullPipeline:
         assert r1.catchment.polygon_geojson == r2.catchment.polygon_geojson
         assert r1.rainfall.annual_avg_mm == r2.rainfall.annual_avg_mm
         assert r1.runoff.annual_avg_m3 == r2.runoff.annual_avg_m3
+        assert r1.pond_design.water_depth_m == r2.pond_design.water_depth_m

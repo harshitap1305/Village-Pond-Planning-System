@@ -41,7 +41,12 @@ The system automates the highly manual civil engineering process of topographica
 6. **Pond Location Candidate Selection (Depression Analysis)**
    - To find natural locations that hold water, we subtract the *raw DEM* from our *conditioned DEM*. Any cell where the elevation difference is $>0$ is part of a natural topographic depression ("bowl").
    - We group contiguous depression cells together and calculate their exact volume ($m^3$), surface area, and max depth.
-   - **Candidate Scoring**: We evaluate each bowl's deepest point (the sink) based on a weighted formula: $Score = (normalized\_storage\_volume \times 0.6) + (normalized\_catchment\_area \times 0.4)$.
+   - **Candidate Scoring**: We evaluate each bowl by computing a normalized catchment score:
+     $Score = \frac{\text{catchment\_cells}}{\text{total\_DEM\_cells}}$, where `catchment_cells` is the
+     sum of flow-accumulation values at the bowl's sink cells. This is a size-independent metric —
+     a higher score means more of the watershed drains into this bowl. Storage volume (`estimated_storage_m3`)
+     is reported separately in the API response and used for pond dimensioning (Module 4), not blended
+     into the ranking formula.
    - We perform a hard veto, instantly discarding any candidate whose bowl geometry touches the OSM water exclusion mask.
 
 7. **Watershed (Catchment) Delineation via BFS**

@@ -37,11 +37,14 @@ class AnalysisMetadata(BaseModel):
     Provenance information about the analysis run.
 
     Attributes:
-        dem_rows:       Number of rows in the DEM grid.
-        dem_cols:       Number of columns in the DEM grid.
-        dem_cell_size_m: Cell resolution in metres.
-        crs_used:       EPSG code of the projected CRS used internally.
-        contour_count:  Number of contour lines parsed from the input file.
+        dem_rows:            Number of rows in the DEM grid.
+        dem_cols:            Number of columns in the DEM grid.
+        dem_cell_size_m:     Cell resolution in metres.
+        crs_used:            EPSG code of the projected CRS used internally.
+        contour_count:       Number of contour lines parsed from the input file.
+        processing_time_ms:  Wall-clock time for the full analysis pipeline (ms).
+                             Measured from the start of ``AnalysisService.run()``
+                             to just before the final ``AnalysisResult`` is assembled.
     """
 
     dem_rows: int
@@ -49,6 +52,7 @@ class AnalysisMetadata(BaseModel):
     dem_cell_size_m: float
     crs_used: str
     contour_count: int
+    processing_time_ms: float
 
 
 class WaterExclusionMetadata(BaseModel):
@@ -102,12 +106,39 @@ class AnalysisResult(BaseModel):
     """
     Top-level response for POST /analyzeContour.
 
+    All hydrological fields degrade gracefully: if a data source is unavailable,
+    the field is ``null`` and the reason is recorded in ``warnings``.
+    Degradation chain: ``rainfall → runoff → pond_design`` (each depends on the
+    previous; if rainfall is null, runoff and pond_design are also null).
+
     Attributes:
         candidate_locations: Ranked list of pond candidate points (best first).
-        selected_location:   The top-ranked candidate used for watershed delineation.
-        catchment:           Catchment polygon and terrain statistics.
-        metadata:            Provenance information about the analysis run.
-        water_exclusion:     Metadata about the OSM water exclusion layer applied.
+                             Each candidate includes its catchment polygon GeoJSON.
+        selected_location:   The top-ranked candidate used for watershed delineation
+                             and all downstream hydrological calculations.
+        catchment:           Delineated watershed polygon and terrain statistics
+                             for the selected location.
+        metadata:            Provenance information: DEM grid, CRS, contour count,
+                             and total pipeline processing time.
+        water_exclusion:     Metadata about the OSM water exclusion layer applied
+                             to discard bowl candidates that overlap existing water.
+        land_exclusion:      Metadata about the OSM built-up land exclusion layer
+                             applied to discard candidates on buildings / urban land.
+        rainfall:            10-year historical rainfall statistics (Open-Meteo ERA5-Land
+                             primary; NASA POWER MERRA-2 fallback). ``null`` if both
+                             sources are unavailable.
+        runoff:              SCS-CN runoff estimate for the selected catchment.
+                             ``null`` if ``rainfall`` is ``null``.
+        pond_design:         Recommended pond dimensions derived from runoff supply
+                             and topographic bowl capacity (IS 5477). ``null`` if
+                             ``runoff`` is ``null``.
+        warnings:            Machine-readable list of degraded-state codes.
+                             Empty list ``[]`` in the normal (fully successful) case.
+                             Known codes:
+                             - ``"rainfall_unavailable"``
+                             - ``"runoff_unavailable"``
+                             - ``"runoff_using_rational_fallback"``
+                             - ``"pond_design_unavailable"``
     """
 
     candidate_locations: List[CandidatePoint]
@@ -119,3 +150,4 @@ class AnalysisResult(BaseModel):
     rainfall: RainfallStats | None = None
     runoff: RunoffEstimate | None = None
     pond_design: PondDesign | None = None
+    warnings: List[str] = []

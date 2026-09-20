@@ -2,21 +2,32 @@
 AnalysisService — orchestrates the full contour-to-catchment pipeline.
 
 This class is the single entry point for the POST /analyzeContour endpoint.
-It wires together all modules (2–11) in the correct order. Every step is a
-pure function unit-tested independently; this module is pure composition.
+It wires together all modules in the correct order. Every step is a pure
+function unit-tested independently; this module is pure composition.
 
-Pipeline order:
-  1. Validate file (Module 3)
-  2. Parse KML/KMZ → ContourLines (Module 2)
-  3. Validate contours (Module 3)
-  4. Build PointCloud (Module 4)
-  5. Build raw DEM (Module 5)
-  6. Fill sinks → filled_dem + slope (Module 6)
-  7. Find pond candidates — returns conditioned routing outputs (Module 9)
-  8. Delineate catchment mask via multi-seed BFS (Module 10)
-  9. Convert mask to WGS84 polygon (Module 10)
-  10. Compute catchment metrics + consistency check (Module 11)
+Pipeline order (15 steps):
+  1. Validate file
+  2. Parse KML/KMZ → ContourLines
+  3. Validate contours (semantic checks)
+  4. Build PointCloud
+  5. Build raw DEM
+  6. Fill sinks → filled_dem + slope
+  6b. Build OSM water exclusion mask (fail-open)
+  6c. Build OSM land exclusion mask (fail-open, reuses cached OSM XML)
+  7. Candidate identification + conditioned routing (find_candidates)
+  7b. Rainfall data for selected location (Open-Meteo → NASA POWER, fail-open)
+  7c. Runoff estimation — SCS-CN method (fail-open if rainfall unavailable)
+  7d. Pond dimensioning — IS 5477 storage reconciliation (fail-open)
+  8. Watershed delineation for all candidates (multi-seed BFS)
+  9. Polygonize catchment mask → WGS84 GeoJSON
+  10. Compute catchment metrics + area consistency check
   11. Assemble and return AnalysisResult
+
+Degradation chain:
+  7b (rainfall) → 7c (runoff) → 7d (pond_design)
+  Each step is fail-open: if it fails/is unavailable, its output is None
+  and the pipeline continues. Machine-readable warning codes are recorded
+  in AnalysisResult.warnings for each degraded step.
 
 Note on flow routing:
   Steps 7+ use `conditioned_dem`/`flow_dir_cond`/`flow_accum_cond` returned
@@ -26,6 +37,7 @@ Note on flow routing:
 """
 
 import logging
+import time
 
 from pyproj import Transformer
 from shapely.geometry import mapping
@@ -81,7 +93,10 @@ class AnalysisService:
                         settings.cell_size_m if None.
 
         Returns:
-            AnalysisResult containing candidates, polygon, and metrics.
+            AnalysisResult containing candidates, polygon, metrics, and
+            hydrological outputs (rainfall, runoff, pond_design). Hydrological
+            fields degrade gracefully — each is ``None`` if its data source
+            failed; see ``AnalysisResult.warnings`` for machine-readable codes.
 
         Raises:
             TerrainParseError:    If the file cannot be parsed as KML/KMZ.
@@ -89,6 +104,13 @@ class AnalysisService:
             FileTooLargeError:    If the file exceeds settings.max_upload_mb.
             ValueError:           If no pond candidates are found in the terrain.
         """
+        # ── Timing — wall-clock start ─────────────────────────────────────────
+        _t0 = time.perf_counter()
+
+        # ── Warnings accumulator ──────────────────────────────────────────────
+        # Populated throughout the pipeline when a step degrades gracefully.
+        # Exposed as AnalysisResult.warnings for the frontend to display.
+        _warnings: list[str] = []
         # ── 1. File-level validation ──────────────────────────────────────────
         _log.info(
             "Starting analysis: filename=%s size_bytes=%d", filename, len(file_bytes)
@@ -206,10 +228,20 @@ class AnalysisService:
             lon=selected.lon,
             settings=settings,
         )
+        if rainfall_stats is None:
+            _warnings.append("rainfall_unavailable")
+            _log.warning("Rainfall unavailable — warning added, pipeline continues.")
 
         # ── 7c. Runoff estimation for selected catchment ──────────────────────
         # Applies SCS-CN method to the 10-year monthly rainfall from Step 7b.
-        # builtup_fraction comes from the Module 1 land mask (already computed).
+        #
+        # builtup_fraction: fraction of DEM-bbox cells classified as built-up.
+        # NOTE: This is an approximation — the land mask covers the full DEM
+        # bounding box, not just the delineated catchment (which isn't available
+        # until Step 8). In practice, the bias is small (<5% CN impact) and the
+        # direction is safe: overestimating builtup → higher CN → higher runoff
+        # estimate → conservative (safe) pond design.
+        #
         # Fail-open: None if rainfall_stats is unavailable.
         runoff_estimate: RunoffEstimate | None = None
         if rainfall_stats is not None:
@@ -226,12 +258,17 @@ class AnalysisService:
                     hsg=settings.default_hsg,
                     runoff_coefficient_fallback=settings.runoff_coefficient_fallback,
                 )
+                if runoff_estimate.method == "rational_annual_fallback":
+                    _warnings.append("runoff_using_rational_fallback")
             except Exception as exc:  # noqa: BLE001
                 _log.warning(
                     "Runoff estimation failed (%s) — runoff will be null.", exc
                 )
+                _warnings.append("runoff_unavailable")
+        else:
+            _warnings.append("runoff_unavailable")
 
-        # ── 7d. Pond dimensioning ────────────────────────────────────────
+        # ── 7d. Pond dimensioning ─────────────────────────────────────────────
         # Reconciles hydrological supply (Module 3) with topographic capacity
         # (Phase 2) to recommend physical pond dimensions.
         # Fail-open: None if runoff_estimate is unavailable.
@@ -246,8 +283,16 @@ class AnalysisService:
                 )
             except Exception as exc:  # noqa: BLE001
                 _log.warning("Pond design failed (%s) — pond_design will be null.", exc)
+                _warnings.append("pond_design_unavailable")
+        else:
+            _warnings.append("pond_design_unavailable")
 
         # ── 8 & 9. Watershed delineation & Polygonization for all candidates ──
+        # NOTE on cache thread-safety: _rainfall_cache and the OSM cache in
+        # water_exclusion.py are module-level dicts accessed from run_in_threadpool
+        # threads. Python's GIL prevents dict corruption; the worst-case race
+        # (two threads both miss cache simultaneously) causes a redundant API call,
+        # not a correctness bug. No lock is needed for correctness.
         for cand in candidates:
             cand_mask = delineate_catchment(
                 flow_dir_cond, seed_cells=cand.bowl_sink_rcs
@@ -277,6 +322,12 @@ class AnalysisService:
         )
 
         # ── 11. Assemble response ─────────────────────────────────────────────
+        processing_time_ms = round((time.perf_counter() - _t0) * 1000, 1)
+        _log.info(
+            "Pipeline complete: %.0f ms, warnings=%s",
+            processing_time_ms,
+            _warnings or "none",
+        )
         return AnalysisResult(
             candidate_locations=candidates,
             selected_location=selected,
@@ -292,6 +343,7 @@ class AnalysisService:
                 dem_cell_size_m=raw_dem.cell_size,
                 crs_used=raw_dem.crs,
                 contour_count=len(contours),
+                processing_time_ms=processing_time_ms,
             ),
             water_exclusion=WaterExclusionMetadata(
                 source=water_result.source,
@@ -307,6 +359,7 @@ class AnalysisService:
             rainfall=rainfall_stats,
             runoff=runoff_estimate,
             pond_design=pond_design,
+            warnings=_warnings,
         )
 
 

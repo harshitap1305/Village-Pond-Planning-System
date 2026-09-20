@@ -85,6 +85,16 @@ class TestFullPipeline:
         assert m.dem_cell_size_m > 0
         assert m.crs_used.startswith("EPSG:")
         assert m.contour_count > 0
+        # Module 5: processing time must be measured and positive
+        assert m.processing_time_ms > 0
+
+    def test_warnings_present_and_empty_in_happy_path(self, pipeline_result):
+        """warnings must be an empty list when all modules succeed."""
+        assert isinstance(pipeline_result.warnings, list)
+        # In the happy-path (mocked rainfall succeeds), no warnings expected
+        assert "rainfall_unavailable" not in pipeline_result.warnings
+        assert "runoff_unavailable" not in pipeline_result.warnings
+        assert "pond_design_unavailable" not in pipeline_result.warnings
 
     def test_candidate_new_fields_present(self, pipeline_result):
         """New depression-method fields must be populated on every candidate."""

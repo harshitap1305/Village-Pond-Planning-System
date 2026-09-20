@@ -26,12 +26,26 @@ async def health_check():
 @router.post(
     "/analyzeContour",
     response_model=AnalysisResult,
+    responses={
+        400: {"description": "Malformed or unreadable KML/KMZ file"},
+        413: {"description": "File exceeds the upload size limit"},
+        415: {"description": "Unsupported file format — must be .kml or .kmz"},
+        422: {
+            "description": (
+                "Valid KML but no suitable pond candidates found in the terrain, "
+                "or request body validation failed"
+            )
+        },
+    },
     summary="Analyze a KML/KMZ contour file and delineate a pond catchment",
     description=(
         "Upload a KML or KMZ file containing elevation contour lines. "
         "The API parses the contours, builds a DEM, runs hydrological routing, "
         "identifies optimal pond locations, and returns the delineated catchment "
-        "polygon with terrain statistics."
+        "polygon with terrain statistics, historical rainfall data, runoff estimates, "
+        "and recommended pond dimensions. Hydrological fields degrade gracefully "
+        "when external data sources are unavailable — check ``warnings`` in the "
+        "response for machine-readable degraded-state codes."
     ),
 )
 async def analyze_contour(

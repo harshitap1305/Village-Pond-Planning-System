@@ -20,6 +20,14 @@
   <!-- Chart.js 4.x -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
+  <!--
+    Frontend environment config — loaded before the main module.
+    Copy frontend/env.example.js → frontend/env.js and edit for your setup.
+    env.js is gitignored; this script tag gracefully falls back to defaults
+    if the file is absent (window.ENV will be undefined and all ?? defaults apply).
+  -->
+  <script src="env.js" onerror="console.warn('env.js not found — using built-in defaults. Copy env.example.js to env.js to configure.')"></script>
+
   <style>
     /* ─── Design System ─────────────────────────────────────────── */
     :root {
@@ -376,7 +384,8 @@
       <input type="file" id="file-input" accept=".kml,.kmz" hidden />
       <div class="upload-icon">⬆</div>
       <strong>Drop KML / KMZ here</strong>
-      <p class="sub">or click to browse your files</p>
+      <p class="sub" id="upload-hint">or click to browse your files</p>
+
       <p id="file-name"></p>
     </div>
 
@@ -458,9 +467,17 @@
 <script type="module">
   import { kml as parseKml } from 'https://unpkg.com/@tmcw/togeojson?module';
 
+  /* ─── Runtime config from env.js (window.ENV) ───────────────── */
+  const ENV = window.ENV || {};
+  const API_BASE_URL  = (ENV.API_BASE_URL  ?? '').replace(/\/$/, ''); // strip trailing slash
+  const WET_MONTHS    = new Set(ENV.WET_SEASON_MONTHS ?? [5, 6, 7, 8]);
+  const TILE_URL      = ENV.TILE_URL ?? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+  const TILE_ATTR     = ENV.TILE_ATTRIBUTION ?? '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+  const MAP_VIEW      = ENV.MAP_INITIAL_VIEW ?? [22.5, 80.0, 5];
+  const MAX_UPLOAD_MB = ENV.MAX_UPLOAD_MB ?? 20;
+
   /* ─── Constants ──────────────────────────────────────────────── */
-  const MONTHS     = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const WET_MONTHS = new Set([5,6,7,8]); // 0-indexed Jun–Sep
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
   const WARNING_MESSAGES = {
     'rainfall_unavailable':
@@ -487,12 +504,17 @@
   const pondEl        = document.getElementById('pond-details');
   const metaEl        = document.getElementById('meta-details');
 
+  // Update upload hint with the configured size limit
+  document.getElementById('upload-hint').textContent =
+    `or click to browse your files · max ${MAX_UPLOAD_MB} MB`;
+
+
   /* ─── Map setup ──────────────────────────────────────────────── */
   const map = L.map('map', { zoomControl: true, preferCanvas: false })
-               .setView([22.5, 80.0], 5);
+               .setView([MAP_VIEW[0], MAP_VIEW[1]], MAP_VIEW[2]);
 
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  L.tileLayer(TILE_URL, {
+    attribution: TILE_ATTR,
     subdomains: 'abcd',
     maxZoom: 20,
   }).addTo(map);
@@ -571,7 +593,7 @@
     const form = new FormData();
     form.append('contour_map', file);
     try {
-      const resp = await fetch('/analyzeContour', { method: 'POST', body: form });
+      const resp = await fetch(`${API_BASE_URL}/analyzeContour`, { method: 'POST', body: form });
       if (!resp.ok) {
         let msg = `HTTP ${resp.status}`;
         try { msg = (await resp.json()).detail || msg; } catch(_) {}

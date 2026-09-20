@@ -15,8 +15,10 @@ build/
 venv/
 env/
 
-# Environment secrets — NEVER commit the real .env
+# Environment secrets — NEVER commit the real .env or frontend/env.js
 .env
+frontend/env.js
+
 
 # Testing / Coverage
 .pytest_cache/

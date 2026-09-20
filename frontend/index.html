@@ -59,6 +59,14 @@
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    /*
+      Enforce the HTML `hidden` attribute even when an element has an explicit
+      `display` property (e.g. `display: flex`). Without this, the author
+      stylesheet's display value wins over the UA `[hidden] { display: none }`
+      because the UA rule has no `!important`.
+    */
+    [hidden] { display: none !important; }
+
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       background: var(--bg);
@@ -916,7 +924,12 @@
   }
 
   /* ─── Helpers ────────────────────────────────────────────────── */
-  function showLoading(on) { loadingEl.hidden = !on; }
+  function showLoading(on) {
+    // Use style.display directly (belt-and-suspenders alongside the hidden attribute)
+    // so the spinner is guaranteed to disappear regardless of CSS specificity.
+    loadingEl.hidden = !on;
+    loadingEl.style.display = on ? 'flex' : 'none';
+  }
 
   function clearPreviousLayers() {
     [kmlLayer, catchmentLayer, candidatesLayer, selectedMarker].forEach(l => {

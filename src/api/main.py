@@ -9,9 +9,11 @@ Open API docs at:
 """
 
 import logging
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from src.api.error_handlers import register_error_handlers
 from src.api.routes import router
@@ -41,6 +43,13 @@ app.add_middleware(
 
 app.include_router(router)
 register_error_handlers(app)
+
+# Serve the frontend SPA at "/".
+# Must be mounted LAST so API routes registered above always take priority.
+# Guarded by os.path.isdir so the API works without the frontend dir (e.g. in CI).
+_frontend_dir = os.path.join(os.path.dirname(__file__), "..", "..", "frontend")
+if os.path.isdir(_frontend_dir):
+    app.mount("/", StaticFiles(directory=_frontend_dir, html=True), name="frontend")
 
 if __name__ == "__main__":
     import uvicorn

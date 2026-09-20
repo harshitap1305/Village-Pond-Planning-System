@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Village Pond Planner — AI-based Site Selection</title>
+  <meta name="description" content="Upload a KML/KMZ contour map to identify the optimal village pond location using AI-powered hydrological analysis." />
+
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Leaflet 1.9.4 -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <!-- Chart.js 4.x -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <style>
+    /* ─── Design System ─────────────────────────────────────────── */
+    :root {
+      --bg:            #F8FAFC;
+      --surface:       #FFFFFF;
+      --border:        #E2E8F0;
+      --text:          #1E293B;
+      --text-muted:    #64748B;
+      --accent:        #0EA5E9;
+      --accent-dark:   #0284C7;
+      --accent-light:  #E0F2FE;
+      --accent-mid:    #BAE6FD;
+      --success:       #10B981;
+      --success-bg:    #D1FAE5;
+      --success-text:  #065F46;
+      --warning:       #F59E0B;
+      --warning-bg:    #FFFBEB;
+      --warning-border:#FCD34D;
+      --danger:        #EF4444;
+      --danger-bg:     #FEF2F2;
+      --danger-border: #FECACA;
+      --radius:        10px;
+      --radius-sm:     6px;
+      --shadow:        0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04);
+      --shadow-md:     0 4px 12px rgba(0,0,0,0.08);
+      --sidebar-w:     330px;
+      --header-h:      56px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* ─── Sidebar ────────────────────────────────────────────────── */
+    #sidebar {
+      width: var(--sidebar-w);
+      flex-shrink: 0;
+      height: 100vh;
+      overflow-y: auto;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+    #sidebar::-webkit-scrollbar { width: 4px; }
+    #sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* ─── Sidebar Header ─────────────────────────────────────────── */
+    #sidebar-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      background: var(--surface);
+      z-index: 10;
+    }
+    .logo-icon {
+      font-size: 28px;
+      line-height: 1;
+      filter: drop-shadow(0 1px 2px rgba(14,165,233,0.3));
+    }
+    #sidebar-header h1 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.02em;
+    }
+    #sidebar-header p {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+
+    /* ─── Sidebar Body ───────────────────────────────────────────── */
+    #sidebar-body { padding: 16px; flex: 1; }
+
+    /* ─── Upload Zone ────────────────────────────────────────────── */
+    #upload-zone {
+      border: 2px dashed var(--accent);
+      border-radius: var(--radius);
+      background: var(--accent-light);
+      padding: 28px 16px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, transform 0.1s;
+      user-select: none;
+      margin-bottom: 16px;
+    }
+    #upload-zone:hover { background: #BAE6FD; }
+    #upload-zone.drag-over {
+      background: #7DD3FC;
+      border-color: var(--accent-dark);
+      transform: scale(1.01);
+    }
+    .upload-icon {
+      font-size: 28px;
+      margin-bottom: 8px;
+      color: var(--accent);
+    }
+    #upload-zone strong { font-size: 13px; color: var(--text); }
+    #upload-zone .sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    #file-name {
+      margin-top: 10px;
+      font-size: 11px;
+      color: var(--accent-dark);
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ─── Cards ──────────────────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      box-shadow: var(--shadow);
+      animation: fadeIn 0.25s ease-out;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+    .card-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    /* ─── Stat Table ─────────────────────────────────────────────── */
+    .stat-table { width: 100%; border-collapse: collapse; }
+    .stat-table tr { border-bottom: 1px solid #F1F5F9; }
+    .stat-table tr:last-child { border-bottom: none; }
+    .stat-table td {
+      padding: 5px 0;
+      font-size: 12px;
+      vertical-align: middle;
+    }
+    .stat-table td:first-child { color: var(--text-muted); width: 55%; }
+    .stat-table td:last-child { font-weight: 500; text-align: right; }
+
+    /* ─── Big stat ───────────────────────────────────────────────── */
+    .big-stat {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.03em;
+      margin-bottom: 10px;
+      line-height: 1;
+    }
+
+    /* ─── Badges ─────────────────────────────────────────────────── */
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-green { background: var(--success-bg); color: var(--success-text); }
+    .badge-blue  { background: var(--accent-light); color: var(--accent-dark); }
+    .badge-gray  { background: #F1F5F9; color: var(--text-muted); }
+
+    /* ─── Warnings banner ────────────────────────────────────────── */
+    #warnings {
+      background: var(--warning-bg);
+      border: 1px solid var(--warning-border);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      margin-bottom: 10px;
+      font-size: 12px;
+    }
+    #warnings strong { display: block; margin-bottom: 6px; color: #92400E; }
+    #warnings ul { padding-left: 16px; }
+    #warnings li { margin-bottom: 3px; color: #78350F; }
+
+    /* ─── Error card ─────────────────────────────────────────────── */
+    .card-error {
+      background: var(--danger-bg);
+      border-color: var(--danger-border);
+    }
+    .card-error strong { color: var(--danger); display: block; margin-bottom: 6px; }
+    .card-error p { font-size: 12px; color: #7F1D1D; margin-bottom: 10px; }
+    .btn-retry {
+      display: inline-block;
+      padding: 6px 14px;
+      background: var(--danger);
+      color: white;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn-retry:hover { opacity: 0.85; }
+
+    /* ─── Unavailable message ────────────────────────────────────── */
+    .muted-msg {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-style: italic;
+      padding: 4px 0;
+    }
+
+    /* ─── Map container ──────────────────────────────────────────── */
+    #map-container {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+    #map { width: 100%; height: 100%; }
+
+    /* ─── Loading overlay ────────────────────────────────────────── */
+    #loading {
+      position: absolute;
+      inset: 0;
+      background: rgba(248,250,252,0.82);
+      backdrop-filter: blur(3px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      gap: 14px;
+    }
+    .spinner {
+      width: 44px;
+      height: 44px;
+      border: 4px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text { font-size: 13px; font-weight: 500; color: var(--text-muted); }
+
+    /* ─── Floating legend ────────────────────────────────────────── */
+    #legend {
+      position: absolute;
+      bottom: 32px;
+      right: 12px;
+      z-index: 500;
+      background: rgba(255,255,255,0.95);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      font-size: 12px;
+      box-shadow: var(--shadow-md);
+      min-width: 160px;
+    }
+    #legend strong { display: block; margin-bottom: 8px; font-size: 11px;
+                     text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+    .legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .legend-item:last-child { margin-bottom: 0; }
+    .legend-dot {
+      width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+      border: 2px solid white; box-shadow: 0 0 0 1px rgba(0,0,0,0.1);
+    }
+    .legend-star { font-size: 16px; line-height: 1; color: #EF4444; }
+    .legend-poly {
+      width: 24px; height: 12px; border: 2px solid var(--accent-dark);
+      background: rgba(14,165,233,0.15); border-radius: 2px; flex-shrink: 0;
+    }
+    .legend-line {
+      width: 24px; height: 2px; background: #94A3B8; flex-shrink: 0;
+    }
+
+    /* ─── Rainfall chart wrapper ─────────────────────────────────── */
+    .chart-wrap { margin-top: 12px; }
+
+    /* ─── Processing time pill ───────────────────────────────────── */
+    .time-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 2px 10px;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    /* ─── Feasibility indicator ──────────────────────────────────── */
+    .feasibility {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 500;
+      margin-bottom: 10px;
+    }
+    .feasibility.ok  { background: var(--success-bg); color: var(--success-text); }
+    .feasibility.warn { background: var(--warning-bg); color: #92400E; }
+
+    /* ─── Attribution strip ──────────────────────────────────────── */
+    .attribution {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ─── Mobile ─────────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      body { flex-direction: column; height: auto; overflow: auto; }
+      #sidebar { width: 100%; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+      #map-container { height: 50vh; }
+      #loading, #legend { position: fixed; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ─── Sidebar ──────────────────────────────────────────────────── -->
+<aside id="sidebar">
+  <div id="sidebar-header">
+    <span class="logo-icon">💧</span>
+    <div>
+      <h1>Village Pond Planner</h1>
+      <p>AI-based site selection system</p>
+    </div>
+  </div>
+
+  <div id="sidebar-body">
+    <!-- Upload zone -->
+    <div id="upload-zone" role="button" tabindex="0"
+         aria-label="Upload KML or KMZ contour file">
+      <input type="file" id="file-input" accept=".kml,.kmz" hidden />
+      <div class="upload-icon">⬆</div>
+      <strong>Drop KML / KMZ here</strong>
+      <p class="sub">or click to browse your files</p>
+      <p id="file-name"></p>
+    </div>
+
+    <!-- Results (hidden until analysis completes) -->
+    <div id="results" hidden>
+
+      <!-- Warnings banner -->
+      <div id="warnings" hidden></div>
+
+      <!-- Card 1: Selected Site -->
+      <div class="card">
+        <div class="card-title">📍 Selected Site</div>
+        <div id="site-details"></div>
+      </div>
+
+      <!-- Card 2: Catchment Area -->
+      <div class="card">
+        <div class="card-title">🏔 Catchment Area</div>
+        <div id="catchment-details"></div>
+      </div>
+
+      <!-- Card 3: Rainfall & Runoff -->
+      <div class="card">
+        <div class="card-title">🌧 Rainfall &amp; Runoff</div>
+        <div id="rainfall-details"></div>
+        <div class="chart-wrap">
+          <canvas id="rainfall-chart" height="110"></canvas>
+        </div>
+      </div>
+
+      <!-- Card 4: Pond Design -->
+      <div class="card">
+        <div class="card-title">🏗 Recommended Pond Design</div>
+        <div id="pond-details"></div>
+      </div>
+
+      <!-- Card 5: Analysis Metadata -->
+      <div class="card">
+        <div class="card-title">⚙ Analysis Info</div>
+        <div id="meta-details"></div>
+      </div>
+
+    </div><!-- /results -->
+  </div><!-- /sidebar-body -->
+</aside>
+
+<!-- ─── Map ──────────────────────────────────────────────────────── -->
+<main id="map-container">
+  <div id="map"></div>
+
+  <!-- Loading spinner -->
+  <div id="loading" hidden>
+    <div class="spinner"></div>
+    <p class="loading-text">Analysing terrain…  this takes ~60 s</p>
+  </div>
+
+  <!-- Map legend -->
+  <div id="legend" hidden>
+    <strong>Legend</strong>
+    <div class="legend-item">
+      <span class="legend-star">★</span>
+      <span>Selected pond site</span>
+    </div>
+    <div class="legend-item">
+      <span class="legend-dot" style="background:#3B82F6;"></span>
+      <span>Other candidates</span>
+    </div>
+    <div class="legend-item">
+      <span class="legend-poly"></span>
+      <span>Catchment watershed</span>
+    </div>
+    <div class="legend-item">
+      <span class="legend-line"></span>
+      <span>Input contours (KML)</span>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+  import { kml as parseKml } from 'https://unpkg.com/@tmcw/togeojson?module';
+
+  /* ─── Constants ──────────────────────────────────────────────── */
+  const MONTHS     = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const WET_MONTHS = new Set([5,6,7,8]); // 0-indexed Jun–Sep
+
+  const WARNING_MESSAGES = {
+    'rainfall_unavailable':
+      'Rainfall data unavailable — both Open-Meteo and NASA POWER were unreachable.',
+    'runoff_unavailable':
+      'Runoff estimation skipped (requires rainfall data).',
+    'runoff_using_rational_fallback':
+      'Monthly rainfall data missing; runoff estimated using annual average (rational method — less precise).',
+    'pond_design_unavailable':
+      'Pond design skipped (requires runoff estimate).',
+  };
+
+  /* ─── DOM refs ───────────────────────────────────────────────── */
+  const uploadZone    = document.getElementById('upload-zone');
+  const fileInput     = document.getElementById('file-input');
+  const fileNameEl    = document.getElementById('file-name');
+  const resultsEl     = document.getElementById('results');
+  const loadingEl     = document.getElementById('loading');
+  const legendEl      = document.getElementById('legend');
+  const warningsEl    = document.getElementById('warnings');
+  const siteEl        = document.getElementById('site-details');
+  const catchmentEl   = document.getElementById('catchment-details');
+  const rainfallEl    = document.getElementById('rainfall-details');
+  const pondEl        = document.getElementById('pond-details');
+  const metaEl        = document.getElementById('meta-details');
+
+  /* ─── Map setup ──────────────────────────────────────────────── */
+  const map = L.map('map', { zoomControl: true, preferCanvas: false })
+               .setView([22.5, 80.0], 5);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    subdomains: 'abcd',
+    maxZoom: 20,
+  }).addTo(map);
+
+  /* ─── Layer handles ──────────────────────────────────────────── */
+  let kmlLayer       = null;
+  let catchmentLayer = null;
+  let candidatesLayer= null;
+  let selectedMarker = null;
+  let rainfallChart  = null;
+
+  /* ─── Custom marker icons ────────────────────────────────────── */
+  function makeDotIcon(color, size = 14) {
+    return L.divIcon({
+      className: '',
+      iconSize: [size, size],
+      iconAnchor: [size/2, size/2],
+      html: `<div style="
+        width:${size}px;height:${size}px;border-radius:50%;
+        background:${color};border:2px solid white;
+        box-shadow:0 1px 4px rgba(0,0,0,0.35);"></div>`,
+    });
+  }
+
+  const starIcon = L.divIcon({
+    className: '',
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
+    popupAnchor: [0, -14],
+    html: `<div style="
+      font-size:22px;line-height:1;text-align:center;
+      color:#EF4444;
+      filter:drop-shadow(0 1px 3px rgba(0,0,0,0.45));
+      cursor:pointer;">★</div>`,
+  });
+
+  /* ─── Upload interactions ────────────────────────────────────── */
+  uploadZone.addEventListener('click', () => fileInput.click());
+  uploadZone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+  fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+  uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+  uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+  uploadZone.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadZone.classList.remove('drag-over');
+    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+
+  /* ─── Main file handler ──────────────────────────────────────── */
+  async function handleFile(file) {
+    fileNameEl.textContent = file.name;
+    clearPreviousLayers();
+    resultsEl.hidden = true;
+    legendEl.hidden  = true;
+    warningsEl.hidden = true;
+    showLoading(true);
+
+    /* 1. Preview KML contours on map while API runs */
+    try {
+      const text = await file.text();
+      const dom  = new DOMParser().parseFromString(text, 'text/xml');
+      const geo  = parseKml(dom);
+      kmlLayer = L.geoJSON(geo, {
+        style: { color: '#94A3B8', weight: 1, fillOpacity: 0 },
+        pointToLayer: () => null, // skip placemark points — just show lines
+      }).addTo(map);
+      if (kmlLayer.getLayers().length > 0) {
+        try { map.fitBounds(kmlLayer.getBounds(), { padding: [20, 20] }); } catch(_) {}
+      }
+    } catch (e) {
+      console.warn('KML preview failed:', e.message);
+    }
+
+    /* 2. POST to API */
+    const form = new FormData();
+    form.append('contour_map', file);
+    try {
+      const resp = await fetch('/analyzeContour', { method: 'POST', body: form });
+      if (!resp.ok) {
+        let msg = `HTTP ${resp.status}`;
+        try { msg = (await resp.json()).detail || msg; } catch(_) {}
+        showError(msg);
+        return;
+      }
+      const result = await resp.json();
+      renderResult(result);
+    } catch (e) {
+      showError('Network error — is the API server running?');
+    } finally {
+      showLoading(false);
+    }
+  }
+
+  /* ─── Render everything from API result ──────────────────────── */
+  function renderResult(r) {
+    // Map layers
+    renderMapLayers(r);
+
+    // Sidebar cards
+    renderSiteCard(r);
+    renderCatchmentCard(r.catchment);
+    renderRainfallCard(r.rainfall, r.runoff);
+    renderPondCard(r.pond_design);
+    renderMetaCard(r.metadata, r.water_exclusion, r.land_exclusion);
+
+    // Warnings banner
+    if (r.warnings && r.warnings.length > 0) {
+      warningsEl.hidden = false;
+      warningsEl.innerHTML = `<strong>⚠ Data quality notices</strong><ul>
+        ${r.warnings.map(w => `<li>${WARNING_MESSAGES[w] || w}</li>`).join('')}
+      </ul>`;
+    }
+
+    resultsEl.hidden = false;
+    legendEl.hidden  = false;
+  }
+
+  /* ─── Map layer rendering ────────────────────────────────────── */
+  function renderMapLayers(r) {
+    // Catchment polygon
+    catchmentLayer = L.geoJSON(r.catchment.polygon_geojson, {
+      style: {
+        color: '#0284C7',
+        weight: 2.5,
+        fillColor: '#0EA5E9',
+        fillOpacity: 0.13,
+        dashArray: null,
+      },
+    }).bindTooltip('Catchment watershed', { sticky: true }).addTo(map);
+
+    // Candidate markers (all except selected)
+    candidatesLayer = L.layerGroup();
+    r.candidate_locations.forEach((c, i) => {
+      const isSelected = (c.lat === r.selected_location.lat && c.lon === r.selected_location.lon);
+      if (isSelected) return;
+      const marker = L.marker([c.lat, c.lon], { icon: makeDotIcon('#3B82F6', 14) });
+      marker.bindPopup(`
+        <div style="min-width:160px;font-family:Inter,sans-serif;font-size:12px;">
+          <strong style="font-size:13px;">Candidate #${i + 1}</strong><br/>
+          <table style="width:100%;margin-top:6px;border-collapse:collapse;">
+            <tr><td style="color:#64748B">Score</td><td style="text-align:right;font-weight:600">${(c.score*100).toFixed(1)}%</td></tr>
+            <tr><td style="color:#64748B">Catchment</td><td style="text-align:right;font-weight:600">${c.catchment_area_ha.toFixed(1)} ha</td></tr>
+            <tr><td style="color:#64748B">Est. storage</td><td style="text-align:right;font-weight:600">${fmtVol(c.estimated_storage_m3)}</td></tr>
+            <tr><td style="color:#64748B">Depth</td><td style="text-align:right;font-weight:600">${c.depression_depth_m.toFixed(2)} m</td></tr>
+          </table>
+        </div>`);
+      candidatesLayer.addLayer(marker);
+    });
+    candidatesLayer.addTo(map);
+
+    // Selected site — red star
+    const sel = r.selected_location;
+    selectedMarker = L.marker([sel.lat, sel.lon], { icon: starIcon, zIndexOffset: 1000 });
+    selectedMarker.bindPopup(`
+      <div style="min-width:160px;font-family:Inter,sans-serif;font-size:12px;">
+        <strong style="font-size:13px;color:#0EA5E9;">⭐ Selected Site</strong><br/>
+        <table style="width:100%;margin-top:6px;border-collapse:collapse;">
+          <tr><td style="color:#64748B">Score</td><td style="text-align:right;font-weight:600">${(sel.score*100).toFixed(1)}%</td></tr>
+          <tr><td style="color:#64748B">Elevation</td><td style="text-align:right;font-weight:600">${sel.elevation.toFixed(1)} m</td></tr>
+          <tr><td style="color:#64748B">Catchment</td><td style="text-align:right;font-weight:600">${sel.catchment_area_ha.toFixed(1)} ha</td></tr>
+        </table>
+      </div>`).addTo(map);
+
+    // Fit map to catchment
+    try { map.fitBounds(catchmentLayer.getBounds(), { padding: [30, 30] }); } catch(_) {}
+  }
+
+  /* ─── Sidebar: Card 1 — Selected Site ───────────────────────── */
+  function renderSiteCard(r) {
+    const sel = r.selected_location;
+    const n   = r.candidate_locations.length;
+    siteEl.innerHTML = `
+      <table class="stat-table">
+        <tr>
+          <td>Latitude</td>
+          <td>${sel.lat.toFixed(6)}°N</td>
+        </tr>
+        <tr>
+          <td>Longitude</td>
+          <td>${sel.lon.toFixed(6)}°E</td>
+        </tr>
+        <tr>
+          <td>Elevation</td>
+          <td>${sel.elevation.toFixed(1)} m</td>
+        </tr>
+        <tr>
+          <td>Catchment score</td>
+          <td><span class="badge badge-green">${(sel.score*100).toFixed(1)}%</span></td>
+        </tr>
+        <tr>
+          <td>Depression depth</td>
+          <td>${sel.depression_depth_m.toFixed(2)} m</td>
+        </tr>
+        <tr>
+          <td>Depression area</td>
+          <td>${sel.depression_area_ha.toFixed(3)} ha</td>
+        </tr>
+        <tr>
+          <td>Candidates found</td>
+          <td><span class="badge badge-blue">${n} site${n !== 1 ? 's' : ''}</span></td>
+        </tr>
+      </table>`;
+  }
+
+  /* ─── Sidebar: Card 2 — Catchment ───────────────────────────── */
+  function renderCatchmentCard(c) {
+    catchmentEl.innerHTML = `
+      <div class="big-stat">${c.area_ha.toFixed(1)} ha</div>
+      <table class="stat-table">
+        <tr>
+          <td>Elevation range</td>
+          <td>${c.elevation_stats.min.toFixed(0)}–${c.elevation_stats.max.toFixed(0)} m</td>
+        </tr>
+        <tr>
+          <td>Mean elevation</td>
+          <td>${c.elevation_stats.mean.toFixed(1)} m</td>
+        </tr>
+        <tr>
+          <td>Mean slope</td>
+          <td>${c.slope_stats.mean.toFixed(1)}°</td>
+        </tr>
+        <tr>
+          <td>Max slope</td>
+          <td>${c.slope_stats.max.toFixed(1)}°</td>
+        </tr>
+      </table>`;
+  }
+
+  /* ─── Sidebar: Card 3 — Rainfall & Runoff ───────────────────── */
+  function renderRainfallCard(rf, ru) {
+    if (!rf || !ru) {
+      rainfallEl.innerHTML = '<p class="muted-msg">Rainfall data unavailable for this location.</p>';
+      return;
+    }
+    const srcLabel = rf.source === 'open_meteo_era5_land'
+      ? 'Open-Meteo ERA5-Land' : 'NASA POWER MERRA-2';
+    rainfallEl.innerHTML = `
+      <table class="stat-table">
+        <tr><td>Annual average</td><td>${rf.annual_avg_mm.toFixed(0)} mm/yr</td></tr>
+        <tr><td>Wet season (Jun–Sep)</td><td>${rf.wet_season_avg_mm.toFixed(0)} mm</td></tr>
+        <tr><td>Dry season (Oct–May)</td><td>${rf.dry_season_avg_mm.toFixed(0)} mm</td></tr>
+        <tr><td>Wettest month</td><td>${MONTHS[rf.wettest_month - 1]}</td></tr>
+        <tr><td>Annual runoff</td><td><strong>${fmtVol(ru.annual_avg_m3)}</strong></td></tr>
+        <tr><td>Wet season runoff</td><td>${fmtVol(ru.wet_season_avg_m3)}</td></tr>
+        <tr><td>Runoff depth</td><td>${ru.runoff_depth_mm.toFixed(1)} mm</td></tr>
+        <tr><td>Curve Number</td><td>CN ${ru.curve_number} (HSG-${ru.hsg_assumed})</td></tr>
+        <tr><td>Land cover</td><td>${fmtLandCover(ru.land_cover_assumed)}</td></tr>
+        <tr>
+          <td>Data source</td>
+          <td><span class="badge badge-gray">${srcLabel}</span></td>
+        </tr>
+        <tr><td>Data period</td><td>${rf.data_start_year}–${rf.data_end_year} (${rf.years_of_data} yr)</td></tr>
+      </table>`;
+    renderRainfallChart(rf.monthly_avg_mm, ru.peak_month);
+  }
+
+  /* ─── Chart.js rainfall bar chart ───────────────────────────── */
+  function renderRainfallChart(monthly, peakMonth) {
+    const ctx = document.getElementById('rainfall-chart').getContext('2d');
+    if (rainfallChart) rainfallChart.destroy();
+    rainfallChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: MONTHS,
+        datasets: [{
+          label: 'Avg rainfall (mm)',
+          data: monthly,
+          backgroundColor: monthly.map((_, i) =>
+            WET_MONTHS.has(i) ? '#0EA5E9' : '#BAE6FD'),
+          borderRadius: 3,
+          borderSkipped: false,
+        }],
+      },
+      options: {
+        responsive: true,
+        animation: { duration: 400 },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: (items) => MONTHS[items[0].dataIndex],
+              label: (item) => ` ${item.raw.toFixed(1)} mm`,
+            },
+          },
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { font: { size: 10 }, color: '#94A3B8' },
+          },
+          y: {
+            beginAtZero: true,
+            ticks: { maxTicksLimit: 4, font: { size: 10 }, color: '#94A3B8' },
+            grid: { color: '#F1F5F9' },
+            title: { display: true, text: 'mm', font: { size: 10 }, color: '#94A3B8' },
+          },
+        },
+      },
+    });
+  }
+
+  /* ─── Sidebar: Card 4 — Pond Design ─────────────────────────── */
+  function renderPondCard(pd) {
+    if (!pd) {
+      pondEl.innerHTML = '<p class="muted-msg">Pond design unavailable — rainfall data required.</p>';
+      return;
+    }
+    const feasOk = pd.fills_in_wet_season && !pd.supply_deficit;
+    pondEl.innerHTML = `
+      <div class="feasibility ${feasOk ? 'ok' : 'warn'}">
+        ${feasOk ? '✅' : '⚠'}
+        ${feasOk
+          ? 'Fills reliably in wet season'
+          : pd.supply_deficit ? 'Supply deficit — may not fill every year' : 'Marginal filling in wet season'}
+      </div>
+      <table class="stat-table">
+        <tr>
+          <td>Water depth</td>
+          <td><strong>${pd.water_depth_m.toFixed(2)} m</strong></td>
+        </tr>
+        <tr>
+          <td>Embankment height</td>
+          <td>${pd.embankment_height_m.toFixed(2)} m</td>
+        </tr>
+        <tr>
+          <td>Live storage</td>
+          <td>${fmtVol(pd.live_storage_m3)}</td>
+        </tr>
+        <tr>
+          <td>Total storage (IS 5477)</td>
+          <td><strong>${fmtVol(pd.total_storage_m3)}</strong></td>
+        </tr>
+        <tr>
+          <td>Surface area</td>
+          <td>${(pd.surface_area_m2).toFixed(0)} m²</td>
+        </tr>
+        <tr>
+          <td>Annual runoff supply</td>
+          <td>${fmtVol(pd.annual_runoff_m3)}</td>
+        </tr>
+        <tr>
+          <td>Topographic capacity</td>
+          <td>${fmtVol(pd.topographic_storage_m3)}</td>
+        </tr>
+        <tr>
+          <td>Design constrained by</td>
+          <td><span class="badge badge-gray">${pd.constrained_by}</span></td>
+        </tr>
+        <tr>
+          <td>Side slope (H:V)</td>
+          <td>${pd.side_slope}:1</td>
+        </tr>
+        <tr>
+          <td>Freeboard</td>
+          <td>${pd.freeboard_m} m</td>
+        </tr>
+      </table>
+      <p class="attribution">IS 5477 storage · IS 12169 embankment · NABARD depth · CWC evaporation</p>`;
+  }
+
+  /* ─── Sidebar: Card 5 — Analysis Metadata ───────────────────── */
+  function renderMetaCard(m, we, le) {
+    const waterSrc = we.source === 'osm'
+      ? `OSM (${we.excluded_feature_count} features)` : we.source;
+    const landSrc = le.source === 'osm'
+      ? `OSM (${le.excluded_feature_count} features, ${le.builtup_cells_masked} cells)` : le.source;
+    metaEl.innerHTML = `
+      <table class="stat-table">
+        <tr>
+          <td>Processing time</td>
+          <td><span class="time-pill">⏱ ${(m.processing_time_ms / 1000).toFixed(1)} s</span></td>
+        </tr>
+        <tr>
+          <td>DEM resolution</td>
+          <td>${m.dem_cell_size_m} m/cell</td>
+        </tr>
+        <tr>
+          <td>DEM grid</td>
+          <td>${m.dem_rows} × ${m.dem_cols}</td>
+        </tr>
+        <tr>
+          <td>Contour lines</td>
+          <td>${m.contour_count}</td>
+        </tr>
+        <tr>
+          <td>CRS</td>
+          <td>${m.crs_used}</td>
+        </tr>
+        <tr>
+          <td>Water exclusion</td>
+          <td>${waterSrc}</td>
+        </tr>
+        <tr>
+          <td>Land exclusion</td>
+          <td>${landSrc}</td>
+        </tr>
+      </table>`;
+  }
+
+  /* ─── Helpers ────────────────────────────────────────────────── */
+  function showLoading(on) { loadingEl.hidden = !on; }
+
+  function clearPreviousLayers() {
+    [kmlLayer, catchmentLayer, candidatesLayer, selectedMarker].forEach(l => {
+      if (l) { try { map.removeLayer(l); } catch(_) {} }
+    });
+    kmlLayer = catchmentLayer = candidatesLayer = selectedMarker = null;
+    if (rainfallChart) { rainfallChart.destroy(); rainfallChart = null; }
+  }
+
+  function showError(msg) {
+    resultsEl.hidden = false;
+    resultsEl.innerHTML = `
+      <div class="card card-error">
+        <strong>❌ Analysis failed</strong>
+        <p>${msg}</p>
+        <button class="btn-retry" onclick="location.reload()">Try again</button>
+      </div>`;
+  }
+
+  function fmtVol(m3) {
+    if (m3 >= 1_000_000) return `${(m3 / 1_000_000).toFixed(2)} M m³`;
+    if (m3 >= 1_000)     return `${(m3 / 1_000).toFixed(1)} k m³`;
+    return `${m3.toFixed(0)} m³`;
+  }
+
+  function fmtLandCover(raw) {
+    const map = {
+      'mixed_agriculture': 'Mixed agriculture',
+      'built_up': 'Built-up / urban',
+      'vegetated': 'Vegetated / forest',
+    };
+    return map[raw] || raw;
+  }
+</script>
+</body>
+</html>

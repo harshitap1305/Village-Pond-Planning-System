@@ -17,7 +17,7 @@ import time
 
 import numpy as np
 
-from src.external.water.osm_client import OsmApiClient, OsmUnavailableError
+from src.external.water.osm_client import OsmUnavailableError, get_osm_client
 from src.external.water.water_source import build_water_geometries, reproject_and_buffer
 from src.geometry.water_mask import flat_area_heuristic_mask, rasterize_water_mask
 from src.schemas.water import WaterMaskResult
@@ -71,8 +71,8 @@ def build_water_exclusion_mask(
                 cached_entry = None
 
         if cached_entry is None:
-            # ── 2. OSM query (tenacity retry) ─────────
-            client = OsmApiClient(
+            # ── 2. OSM query (tenacity retry + jitter) ───────────────────────
+            client = get_osm_client(
                 endpoint=settings.osm_api_url,
                 timeout_s=settings.osm_timeout_s,
             )

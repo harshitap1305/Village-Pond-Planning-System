@@ -17,6 +17,16 @@ the resolution of both reanalysis products (9–50 km).
 
 This module is called AFTER the candidate is selected so we have the
 exact lat/lon of the winning pond site.
+
+Budget deadline (Module 7 — Reliability Hardening):
+  The full Open-Meteo → NASA POWER chain is capped at _RAINFALL_BUDGET_S
+  seconds of wall-clock time. Without this, a slow Open-Meteo (3 retries ×
+  15 s) followed by a slow NASA POWER (3 retries × 30 s) could block the
+  thread for ~85 s. With the cap, worst-case is ~45 s.
+
+  The deadline is enforced by trimming each client's timeout_s to the
+  remaining budget. If the budget is exhausted before the NASA POWER call,
+  that call is skipped entirely and None is returned.
 """
 
 import logging
@@ -24,12 +34,12 @@ import time
 from datetime import date
 
 from src.external.rainfall.nasa_power_client import (
-    NasaPowerClient,
     NasaPowerUnavailableError,
+    get_nasa_power_client,
 )
 from src.external.rainfall.open_meteo_client import (
-    OpenMeteoClient,
     OpenMeteoUnavailableError,
+    get_open_meteo_client,
 )
 from src.hydrology.rainfall_stats import (
     RainfallStats,
@@ -41,6 +51,11 @@ _log = logging.getLogger(__name__)
 
 # In-memory cache: {(lat2dp, lon2dp, start_year, end_year): (RainfallStats, ts)}
 _rainfall_cache: dict[tuple, tuple[RainfallStats, float]] = {}
+
+# Total wall-clock budget (seconds) for the combined Open-Meteo + NASA POWER
+# chain. Keeps the rainfall step from blocking the thread for ~85 s worst-case.
+# With this cap: ≤ 1 Open-Meteo attempt (15 s) + 1 NASA POWER attempt (30 s) = 45 s.
+_RAINFALL_BUDGET_S: int = 45
 
 
 def _cache_key(lat: float, lon: float, start_year: int, end_year: int) -> tuple:
@@ -60,13 +75,17 @@ def build_rainfall_stats(
     NASA POWER MERRA-2 if Open-Meteo is unavailable. Returns None if both
     sources fail — the pipeline continues without a crash (fail-open).
 
+    The combined call is bounded by ``_RAINFALL_BUDGET_S`` seconds. If the
+    Open-Meteo call exhausts the budget, the NASA POWER fallback is skipped.
+
     Args:
         lat:      WGS84 latitude of the selected pond candidate.
         lon:      WGS84 longitude of the selected pond candidate.
         settings: The global Settings instance.
 
     Returns:
-        :class:`RainfallStats` or None if both APIs are unavailable.
+        :class:`RainfallStats` or None if both APIs are unavailable or the
+        budget is exhausted.
     """
     this_year = date.today().year
     end_year = this_year - 1  # last complete calendar year
@@ -92,11 +111,17 @@ def build_rainfall_stats(
             return stats
         _log.info("Rainfall cache expired for (%.2f, %.2f) — re-querying", lat, lon)
 
+    # ── Budget deadline ───────────────────────────────────────────────────────
+    # All remaining HTTP work must complete within _RAINFALL_BUDGET_S seconds.
+    budget_deadline = time.monotonic() + _RAINFALL_BUDGET_S
+
     # ── 2. Try Open-Meteo (primary) ───────────────────────────────────────────
     try:
-        client = OpenMeteoClient(
+        # Clamp timeout to remaining budget (minimum 2 s to avoid instant failure).
+        remaining = max(2.0, budget_deadline - time.monotonic())
+        client = get_open_meteo_client(
             endpoint=settings.open_meteo_base_url,
-            timeout_s=settings.open_meteo_timeout_s,
+            timeout_s=min(settings.open_meteo_timeout_s, int(remaining)),
         )
         _log.info(
             "Querying Open-Meteo ERA5-Land for (%.4f, %.4f) %s → %s",
@@ -114,7 +139,7 @@ def build_rainfall_stats(
             stats.wet_season_avg_mm,
             stats.years_of_data,
         )
-        _rainfall_cache[key] = (stats, now)
+        _rainfall_cache[key] = (stats, time.monotonic())
         return stats
 
     except (OpenMeteoUnavailableError, ValueError, Exception) as exc:
@@ -124,11 +149,21 @@ def build_rainfall_stats(
             exc,
         )
 
-    # ── 3. Fallback: NASA POWER (MERRA-2) ─────────────────────────────────────
+    # ── 3. Budget check before NASA POWER ────────────────────────────────────
+    remaining = budget_deadline - time.monotonic()
+    if remaining <= 2.0:
+        _log.warning(
+            "Rainfall budget exhausted (%.1f s left) — skipping NASA POWER fallback. "
+            "Returning None; rainfall field will be null in response.",
+            remaining,
+        )
+        return None
+
+    # ── 4. Fallback: NASA POWER (MERRA-2) ─────────────────────────────────────
     try:
-        client_nasa = NasaPowerClient(
+        client_nasa = get_nasa_power_client(
             endpoint=settings.nasa_power_base_url,
-            timeout_s=settings.nasa_power_timeout_s,
+            timeout_s=min(settings.nasa_power_timeout_s, int(remaining)),
         )
         _log.info(
             "Querying NASA POWER MERRA-2 for (%.4f, %.4f) %s → %s",
@@ -146,7 +181,7 @@ def build_rainfall_stats(
             stats.wet_season_avg_mm,
             stats.years_of_data,
         )
-        _rainfall_cache[key] = (stats, now)
+        _rainfall_cache[key] = (stats, time.monotonic())
         return stats
 
     except (NasaPowerUnavailableError, ValueError, Exception) as exc:

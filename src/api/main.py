@@ -10,6 +10,7 @@ Open API docs at:
 
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,15 +19,35 @@ from fastapi.staticfiles import StaticFiles
 from src.api.error_handlers import register_error_handlers
 from src.api.routes import router
 from src.config import settings
+from src.db.engine import create_db_tables, dispose_engine, init_engine
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
+_log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ── Startup ──────────────────────────────────────────────────────────
+    if settings.database_url:
+        init_engine(settings.database_url)
+        await create_db_tables()
+    else:
+        _log.warning(
+            "DATABASE_URL not set — persistence disabled. "
+            "Set DATABASE_URL in .env or docker-compose.yml to enable."
+        )
+    yield
+    # ── Shutdown ─────────────────────────────────────────────────────────
+    await dispose_engine()
+
 
 app = FastAPI(
     title=settings.api_title,
     version=settings.api_version,
+    lifespan=lifespan,
     description=(
         "AI-based Village Pond Planning System — identifies optimal pond sites "
         "from KML/KMZ contour maps and returns delineated catchment polygons."

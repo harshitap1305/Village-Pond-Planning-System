@@ -6,6 +6,12 @@ uvicorn[standard]==0.29.0
 pydantic==2.7.1
 pydantic-settings==2.2.1
 
+# ─── Database (Module 8 — Persistence) ────────────────────────────────────────
+# SQLModel: SQLAlchemy 2.x + Pydantic v2 combined (schema + ORM in one class).
+# asyncpg: fastest async PostgreSQL driver; used via postgresql+asyncpg:// URLs.
+sqlmodel==0.0.21
+asyncpg==0.29.0
+
 # ─── Geospatial Core ──────────────────────────────────────────────────────────
 numpy==1.26.4
 scipy==1.13.0

@@ -19,6 +19,12 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
+    # ── Database (Module 8 — Persistence) ────────────────────────────────────
+    # Optional: set to enable persistence. When absent, analysis runs are
+    # not stored and GET /api/results/{id} returns 503.
+    # Format: postgresql+asyncpg://user:password@host:port/dbname
+    database_url: str | None = None
+
     # ── Environment ─────────────────────────────────────────────────────────
     env: str = "dev"
     log_level: str = "INFO"

@@ -14,7 +14,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import app
+from src.db.engine import is_db_configured
 
+# ---------------------------------------------------------------------------
+# Note: we use TestClient outside a 'with TestClient(app)' block in most tests.
+# This prevents the lifespan manager from running (so init_engine / create_tables
+# do not run, meaning is_db_configured() is False). This simulates the standard
+# run without a DATABASE_URL set, verifying the fail-open DB save logic.
+# ---------------------------------------------------------------------------
 client = TestClient(app, raise_server_exceptions=False)
 FIXTURE = Path("tests/fixtures/contours_1m.kml")
 
@@ -39,15 +46,12 @@ _MOCK_RAINFALL = json.dumps(
 def _post_fixture_file():
     """Helper: POST contours_1m.kml with external APIs mocked."""
     with (
-        patch(
-            "src.catchment.water_exclusion.OsmApiClient.query_water_features",
-            return_value=_EMPTY_OSM,
-        ),
-        patch(
-            "src.catchment.rainfall_service.OpenMeteoClient.get_daily_rainfall",
-            return_value=_MOCK_RAINFALL,
-        ),
+        patch("src.catchment.water_exclusion.get_osm_client") as mock_osm,
+        patch("src.catchment.rainfall_service.get_open_meteo_client") as mock_om,
     ):
+        mock_osm.return_value.query_water_features.return_value = _EMPTY_OSM
+        mock_om.return_value.get_daily_rainfall.return_value = _MOCK_RAINFALL
+
         with open(FIXTURE, "rb") as f:
             return client.post(
                 "/analyzeContour",
@@ -62,8 +66,13 @@ def _post_fixture_file():
 
 
 @pytest.mark.integration
-def test_analyze_contour_success():
-    """Full pipeline via HTTP — checks 200 status and all module output fields."""
+def test_analyze_contour_success_without_db():
+    """
+    Full pipeline via HTTP when DATABASE_URL is not set.
+    Checks 200 status, all module output fields, and result_id=None.
+    """
+    assert not is_db_configured()
+
     response = _post_fixture_file()
 
     assert response.status_code == 200
@@ -96,6 +105,10 @@ def test_analyze_contour_success():
     assert body["pond_design"] is not None
     assert 1.5 <= body["pond_design"]["water_depth_m"] <= 4.0
 
+    # Module 8 — persistence
+    assert "result_id" in body
+    assert body["result_id"] is None  # no DB configured
+
 
 @pytest.mark.integration
 def test_analyze_contour_with_rainfall_unavailable():
@@ -106,22 +119,17 @@ def test_analyze_contour_with_rainfall_unavailable():
     Open-Meteo and NASA POWER failing after retries). This avoids a cache-hit
     from the previous test — the in-memory ``_rainfall_cache`` is bypassed
     entirely since we stub the public interface, not the underlying clients.
-
-    Expected behaviour:
-    - ``rainfall``, ``runoff``, and ``pond_design`` are all null.
-    - ``warnings`` contains the three expected machine-readable codes.
     """
     with (
-        patch(
-            "src.catchment.water_exclusion.OsmApiClient.query_water_features",
-            return_value=_EMPTY_OSM,
-        ),
+        patch("src.catchment.water_exclusion.get_osm_client") as mock_osm,
         # Patch the public interface — bypasses the cache and all client logic.
         patch(
             "src.api.analysis_service.build_rainfall_stats",
             return_value=None,
         ),
     ):
+        mock_osm.return_value.query_water_features.return_value = _EMPTY_OSM
+
         with open(FIXTURE, "rb") as f:
             response = client.post(
                 "/analyzeContour",
@@ -172,3 +180,13 @@ def test_analyze_contour_wrong_extension_returns_415():
         files={"contour_map": ("data.csv", b"a,b,c", "text/csv")},
     )
     assert response.status_code == 415
+
+
+def test_get_result_returns_503_when_db_not_configured():
+    """GET /api/results/{id} returns 503 when DATABASE_URL is not set."""
+    import uuid
+
+    # is_db_configured() is False because we didn't run lifespan.
+    r = client.get(f"/results/{uuid.uuid4()}")
+    assert r.status_code == 503
+    assert "persistence" in r.json()["detail"].lower()

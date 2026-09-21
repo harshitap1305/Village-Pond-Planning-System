@@ -5,6 +5,7 @@ These types define the exact JSON contract the API returns to the frontend.
 Every field is typed and documented so FastAPI auto-generates accurate Swagger docs.
 """
 
+import uuid
 from typing import Any, Dict, List
 
 from pydantic import BaseModel
@@ -151,3 +152,5 @@ class AnalysisResult(BaseModel):
     runoff: RunoffEstimate | None = None
     pond_design: PondDesign | None = None
     warnings: List[str] = []
+
+    result_id: uuid.UUID | None = None

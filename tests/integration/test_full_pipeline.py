@@ -32,15 +32,11 @@ def pipeline_result():
     """Run the full pipeline once per module — expensive (~60s).
     External APIs are mocked so the test is self-contained and offline."""
     with (
-        patch(
-            "src.catchment.water_exclusion.OsmApiClient.query_water_features",
-            return_value=_EMPTY_OSM,
-        ),
-        patch(
-            "src.catchment.rainfall_service.OpenMeteoClient.get_daily_rainfall",
-            return_value=_MOCK_RAINFALL,
-        ),
+        patch("src.catchment.water_exclusion.get_osm_client") as mock_osm,
+        patch("src.catchment.rainfall_service.get_open_meteo_client") as mock_om,
     ):
+        mock_osm.return_value.query_water_features.return_value = _EMPTY_OSM
+        mock_om.return_value.get_daily_rainfall.return_value = _MOCK_RAINFALL
         return analysis_service.run(FIXTURE.read_bytes(), "contours_1m.kml")
 
 
@@ -177,15 +173,11 @@ class TestFullPipeline:
     def test_idempotency(self):
         kml = FIXTURE.read_bytes()
         with (
-            patch(
-                "src.catchment.water_exclusion.OsmApiClient.query_water_features",
-                return_value=_EMPTY_OSM,
-            ),
-            patch(
-                "src.catchment.rainfall_service.OpenMeteoClient.get_daily_rainfall",
-                return_value=_MOCK_RAINFALL,
-            ),
+            patch("src.catchment.water_exclusion.get_osm_client") as mock_osm,
+            patch("src.catchment.rainfall_service.get_open_meteo_client") as mock_om,
         ):
+            mock_osm.return_value.query_water_features.return_value = _EMPTY_OSM
+            mock_om.return_value.get_daily_rainfall.return_value = _MOCK_RAINFALL
             r1 = analysis_service.run(kml, "contours_1m.kml")
             r2 = analysis_service.run(kml, "contours_1m.kml")
         assert r1.candidate_locations == r2.candidate_locations

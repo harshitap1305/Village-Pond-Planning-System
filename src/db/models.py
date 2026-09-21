@@ -14,9 +14,25 @@ PostgreSQL JSONB notes:
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column
+from sqlalchemy import JSON, Column
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.types import TypeDecorator
 from sqlmodel import Field, SQLModel
+
+
+class JSONVariant(TypeDecorator):
+    """
+    Use native JSONB for PostgreSQL (faster, indexable) and standard JSON
+    for SQLite (so in-memory unit tests don't crash with CompileError).
+    """
+
+    impl = JSON
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(JSONB())
+        return dialect.type_descriptor(JSON())
 
 
 class AnalysisRun(SQLModel, table=True):
@@ -34,7 +50,7 @@ class AnalysisRun(SQLModel, table=True):
         description="Original uploaded filename (e.g. 'contours.1m.kml').",
     )
     result_json: dict = Field(
-        sa_column=Column(JSONB, nullable=False),
+        sa_column=Column(JSONVariant, nullable=False),
         description="Full AnalysisResult.model_dump() output stored as PostgreSQL JSONB.",
     )
     created_at: datetime = Field(

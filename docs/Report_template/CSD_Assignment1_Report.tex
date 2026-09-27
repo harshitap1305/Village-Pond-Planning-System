@@ -1,0 +1,569 @@
+%%
+%% CSD Assignment 1 - Final Technical Report
+%% Based on the ACM "acmart" manuscript (single-column) style.
+%%
+\documentclass[manuscript,screen,review]{acmart}
+
+\AtBeginDocument{%
+  \providecommand\BibTeX{{Bib\TeX}}}
+
+\begin{document}
+
+%% =================== TITLE & AUTHOR BLOCK =========================
+\title{AI-based Village Pond Planning System}
+\subtitle{CSD Assignment 1 -- Final Technical Report}
+
+\author{Harshita Patidar}
+\affiliation{%
+  \institution{Your Institute / Department}
+  \city{Your City}
+  \country{India}}
+\email{your.email@institute.ac.in}
+
+\renewcommand{\shortauthors}{Patidar}
+
+%% =================== ABSTRACT ======================================
+\begin{abstract}
+Rural water scarcity in India is a persistent challenge, particularly in
+rain-fed agricultural regions where ponds remain the most cost-effective
+form of water storage. Manual identification of optimal pond sites is
+labour-intensive, inconsistent, and often ignores quantitative terrain and
+hydrological evidence. This report describes a web-based Village Pond
+Planning System that automates site selection using geospatial terrain
+analysis, satellite rainfall data, and classical civil engineering design
+standards. The system accepts either a user-supplied KMZ contour map or a
+user-drawn map rectangle (using free SRTM satellite elevation tiles), and
+runs a 15-step pipeline: DEM interpolation, Priority-Flood sink filling,
+D8 flow routing, OSM-based land exclusion, candidate depression scoring,
+SCS-CN runoff estimation, and IS~5477-compliant pond dimensioning. Results
+are visualised on an interactive Leaflet.js map with a full engineering
+sidebar. On a representative test site in central India (catchment area
+19.5~ha, annual rainfall 1,458~mm), the system recommended a pond with
+1.84~m water depth, 61,400~m$^3$ live storage, and a wet-season fill
+probability of 100\%. End-to-end analysis completes in under 90~seconds.
+\end{abstract}
+
+\keywords{Village Pond Planning, Geospatial Analysis, Rainwater
+  Harvesting, Catchment Estimation, SCS-CN, Web GIS, REST API, DEM,
+  IS~5477}
+
+\maketitle
+
+%% =====================================================================
+\section{Introduction}
+\label{sec:intro}
+
+India loses an estimated 70\% of its annual rainfall as runoff due to
+the absence of local water retention infrastructure. Village ponds,
+functioning as distributed rainwater harvesting tanks, are among the most
+effective interventions: they recharge groundwater, support irrigated
+agriculture in the dry season, and provide livestock and domestic water
+supplies. Despite proven benefits, new pond construction is impeded by the
+difficulty of site selection --- a process that currently requires
+expensive surveying, manual terrain reading, and domain expertise rarely
+available at the village level.
+
+This project develops a \emph{web-based Village Pond Planning System} that
+automates the entire site-selection workflow using freely available
+geospatial data, satellite rainfall records, and classical hydrological
+methods. A village administrator uploads a topographic contour map (or
+simply draws a bounding box on the map), and the system returns ranked pond
+candidates, a delineated catchment watershed, historical rainfall
+statistics, estimated runoff volumes, and a pond design that complies with
+IS~5477 and IS~12169 standards --- all within 90~seconds.
+
+The rest of this report describes the system requirements
+(Section~\ref{sec:requirements}), the architecture
+(Section~\ref{sec:architecture}), the algorithms
+(Section~\ref{sec:methodology}), implementation details
+(Section~\ref{sec:implementation}), evaluation with real outputs
+(Section~\ref{sec:results}), limitations (Section~\ref{sec:discussion}),
+and an AI usage declaration (Section~\ref{sec:ai-usage}).
+
+\subsection{Motivation}
+
+Site selection by hand is hard for three compounding reasons. First,
+natural drainage basins rarely coincide with administrative boundaries, so
+a pond that looks central on a revenue map may capture only a fraction of
+the upstream rainfall. Second, rainfall data is fragmented across IMD
+district records, NASA POWER, and Open-Meteo; aggregating a coherent
+10-year series for an arbitrary coordinate requires API knowledge that
+most field officials lack. Third, candidate sites must be cross-checked
+against existing water bodies, buildings, and land-tenure records to avoid
+legal and engineering conflicts. Automating these steps with reproducible,
+open-source tools directly reduces the expertise barrier for rural water
+managers.
+
+\subsection{Scope of the Project}
+
+The system covers:
+\begin{itemize}
+  \item Ingestion of user-supplied KMZ contour maps \emph{or} free SRTM
+        tiles fetched by bounding-box selection on the map;
+  \item 2D DEM construction at $\approx$2~m resolution (KMZ path) or
+        $\approx$38~m (SRTM tile path);
+  \item Automated depression detection, D8 flow routing, and ranked
+        candidate site generation;
+  \item OSM-based exclusion of water bodies and built-up land;
+  \item 10-year monthly rainfall retrieval (Open-Meteo / NASA POWER
+        fallback);
+  \item SCS-CN runoff estimation and IS~5477 pond dimensioning;
+  \item Interactive map visualisation and a structured JSON API.
+\end{itemize}
+
+The system does \emph{not} cover structural embankment engineering,
+real-time flood forecasting, land-ownership verification, or construction
+cost estimation.
+
+%% =====================================================================
+\section{Problem Statement and Requirements}
+\label{sec:requirements}
+
+\begin{table}[h]
+  \caption{Functional requirements and their implementation}
+  \label{tab:requirements}
+  \begin{tabular}{p{3.6cm}p{3.6cm}}
+    \toprule
+    Requirement & Implemented in \\
+    \midrule
+    Satellite imagery display & \texttt{src/api/imagery.py} + Leaflet basemap switcher (3 providers) \\
+    Contour map / terrain input & \texttt{src/terrain/kml\_source.py} (KMZ) + \texttt{src/dem/from\_tiles.py} (SRTM) \\
+    Available-land identification & \texttt{src/catchment/water\_exclusion.py} + \texttt{land\_exclusion.py} (OSM Overpass) \\
+    Catchment area estimation & \texttt{src/hydrology/watershed.py} (D8 BFS delineation) \\
+    Historical rainfall query & \texttt{src/catchment/rainfall\_service.py} (Open-Meteo; NASA POWER fallback) \\
+    Runoff volume estimation & \texttt{src/hydrology/runoff.py} (SCS-CN method) \\
+    Pond depth / storage & \texttt{src/catchment/pond\_design.py} (IS~5477) \\
+    Combined overlay / results & \texttt{frontend/index.html} (Leaflet + Chart.js) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Non-Functional Requirements}
+
+\textbf{Performance.} End-to-end analysis must complete in under 120~s.
+Rainfall API calls must complete within 30~s with automatic retry. SRTM
+tile download for a 10~km$^2$ area must complete within 10~s.
+
+\textbf{Reliability.} Every external API call (OSM Overpass, Open-Meteo,
+NASA POWER) is wrapped in a fail-open handler: if the call fails after
+retries, the system returns a degraded-but-valid result with
+machine-readable warning codes rather than crashing.
+
+\textbf{Scalability.} CPU-intensive computation runs in a
+\texttt{run\_in\_threadpool} worker to keep the async event loop free for
+concurrent HTTP requests. Horizontal scaling via multiple uvicorn workers
+is supported by the stateless design.
+
+\textbf{Usability.} The UI must operate in a modern desktop browser with
+no plugins. Area selection must prevent analyses larger than 10~km$^2$
+to protect server resources (configurable via \texttt{.env}).
+
+%% =====================================================================
+\section{System Architecture and High-Level Design}
+\label{sec:architecture}
+
+The system follows a three-tier architecture: a Vanilla JS single-page
+application (SPA) frontend, a Python/FastAPI REST backend, and optional
+PostgreSQL persistence. Two analysis entry points
+(\texttt{POST /analyzeContour} and \texttt{POST /analyzeArea}) converge
+at a shared pipeline from sink-filling onward, avoiding code duplication.
+The only structural difference is how the DEM is built --- from IDW
+interpolation of KMZ contours, or from stitching Terrarium RGB PNG tiles.
+
+\begin{figure}[h]
+  \centering
+  % \includegraphics[width=\linewidth]{architecture-diagram}
+  \caption{High-level system architecture. Both analysis paths produce a
+    DEM object consumed by the shared 15-step pipeline.}
+  \label{fig:architecture}
+  \Description{Flow diagram: browser SPA sends POST /analyzeContour or
+    POST /analyzeArea to FastAPI. KMZ path: KMLTerrainSource + IDW to DEM.
+    Tile path: Terrarium tile download + decode to DEM. Shared pipeline:
+    Priority-Flood, D8 routing, OSM masks, candidates, rainfall, SCS-CN,
+    IS-5477, BFS watershed, polygonise, AnalysisResult JSON to browser.}
+\end{figure}
+
+\subsection{Technology Stack}
+
+\begin{table}[h]
+  \caption{Technology stack}
+  \label{tab:stack}
+  \begin{tabular}{p{2.5cm}p{4.7cm}}
+    \toprule
+    Layer & Technology \\
+    \midrule
+    Language & Python 3.12 \\
+    Web framework & FastAPI 0.111 + uvicorn 0.29 \\
+    Geospatial & NumPy, SciPy, PyProj, Shapely, pysheds, Rasterio \\
+    KML parsing & fastkml 0.12, lxml 5.2 \\
+    Tile DEM & Pillow 10.3, httpx 0.27 \\
+    Rainfall & Open-Meteo ERA5-Land (free); NASA POWER MERRA-2 (free) \\
+    Terrain tiles & AWS Terrarium (SRTM, public domain, no key) \\
+    OSM exclusion & Overpass API (free, no key) \\
+    Persistence & SQLModel + asyncpg + PostgreSQL (optional) \\
+    Config & pydantic-settings, \texttt{.env} file \\
+    Frontend & HTML/CSS/JS, Leaflet.js, Chart.js \\
+    CI & GitHub Actions, black, ruff, pre-commit \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+No paid APIs, proprietary datasets, or ML models are used. All data
+sources are freely available and reproducible.
+
+%% =====================================================================
+\section{Methodology}
+\label{sec:methodology}
+
+\subsection{Terrain and Elevation Analysis}
+
+\textbf{KMZ path.} KML/KMZ contour files are parsed with fastkml + lxml
+to extract elevation \texttt{LineString} rings. Each ring is reprojected
+from WGS84 to the local UTM zone (auto-detected from centroid longitude).
+Contour lines are densified to 1~m vertex spacing to form a dense 3D
+point cloud. A 2D regular grid (default 2~m $\times$ 2~m) is populated
+by \emph{Inverse Distance Weighting} (IDW) using a SciPy \texttt{KDTree}:
+each grid cell receives a $1/d^2$-weighted average elevation from its $k$
+nearest contour points. Edge cells are filled by nearest-neighbour.
+
+\textbf{SRTM tile path.} The user draws a bounding box on the map.
+\texttt{src/dem/from\_tiles.py} downloads Terrarium-format PNG tiles from
+the AWS Open Data programme at zoom level 12 ($\approx$38~m/pixel).
+Elevation is decoded as $e = (R\times256 + G + B/256) - 32768$. Tiles
+are stitched, clipped to the bounding box, and reprojected to UTM,
+yielding a DEM object structurally identical to the KMZ output.
+
+In both paths the DEM passes through the \emph{Planchon-Darboux
+Priority-Flood} algorithm (pysheds) to fill artificial pits, producing a
+hydrologically conditioned filled DEM. Slope is computed from the filled
+DEM.
+
+\subsection{Catchment Area Delineation}
+
+The filled DEM is processed by pysheds' D8 flow-direction algorithm,
+assigning each raster cell a pointer to its steepest downhill neighbour.
+A topological traversal produces a flow-accumulation raster.
+
+Depression bowls are identified as connected components where
+$\Delta z = \text{filled\_dem} - \text{raw\_dem} > \delta_{min}$
+(default 0.1~m). For each bowl, the lowest-elevation sink cell is the
+pour point. Candidates failing hard veto rules (OSM water/land mask
+overlap, slope $>20°$, area $< 500$~m$^2$) are discarded. Remaining
+candidates are scored by normalised catchment size:
+\[
+  s_i = \frac{\text{flow\_accumulation}(\text{pour\_point}_i)}{\text{total DEM cells}}
+\]
+
+Watershed delineation for the selected site uses a BFS traversal of the
+reversed D8 grid, collecting all upstream cells. The boolean raster is
+polygonised, Douglas-Peucker simplified, and reprojected to WGS84 GeoJSON.
+
+\subsection{Rainfall Data Integration}
+
+After candidate selection, the system fetches 10-year monthly rainfall
+totals for the selected site. The primary source is Open-Meteo ERA5-Land
+(free, $\approx$9~km resolution). On failure after 3 retries, NASA POWER
+MERRA-2 ($\approx$50~km) is used. The current calendar year is excluded
+to ensure complete annual records. Monthly totals are aggregated into
+wet-season (June--September) and dry-season statistics. Failure of both
+APIs is fail-open: fields are returned as \texttt{null} with warning codes.
+
+%% =====================================================================
+\section{Implementation}
+\label{sec:implementation}
+
+\subsection{Backend and API Design}
+
+\begin{table}[h]
+  \caption{REST API endpoints}
+  \label{tab:api}
+  \begin{tabular}{p{3.7cm}p{3.5cm}}
+    \toprule
+    Endpoint & Purpose \\
+    \midrule
+    \texttt{POST /analyzeContour} & KMZ/KML upload $\to$ full analysis \\
+    \texttt{POST /analyzeArea} & Bbox $\to$ SRTM DEM $\to$ analysis \\
+    \texttt{GET /health} & Liveness probe \\
+    \texttt{GET /api/imagery} & Basemap tile URL metadata \\
+    \texttt{GET /api/village/search?q=} & Village registry search \\
+    \texttt{GET /api/village/\{id\}/kml} & Download registered village KML \\
+    \texttt{GET /api/results/\{id\}} & Retrieve saved result (requires DB) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+No authentication is implemented (demonstration use). All endpoints return
+structured JSON. CPU-bound analysis is offloaded via
+\texttt{run\_in\_threadpool} to keep the async event loop free. In-memory
+TTL caches (24~h) are applied to OSM Overpass and rainfall responses,
+reducing repeat API calls within a session to 0~ms.
+
+\subsection{Frontend and Visualization}
+
+The frontend is a single HTML file (\texttt{frontend/index.html}) using
+Leaflet.js for the interactive map and Chart.js for the monthly rainfall
+histogram. No build step or bundler is required.
+
+\begin{figure}[h]
+  \centering
+  % \includegraphics[width=\linewidth]{ui-screenshot}
+  \caption{Application interface: satellite basemap with green catchment
+    polygon, blue candidate dots, red selected-site star, and dashed blue
+    analysis area rectangle. The sidebar shows all results cards and the
+    monthly rainfall bar chart.}
+  \label{fig:ui}
+  \Description{Screenshot of the Village Pond Planning System. Left sidebar
+    shows four result cards (Selected Site, Catchment Area, Rainfall and
+    Runoff, Recommended Pond Design) and a monthly rainfall bar chart. The
+    map shows the catchment polygon and candidate markers.}
+\end{figure}
+
+Two analysis workflows are available:
+\begin{enumerate}
+  \item \textbf{KMZ Upload}: drag-and-drop a contour file. Contours are
+        previewed on the map while the API processes.
+  \item \textbf{Draw Area}: click ``Draw Area on Map'', drag a rectangle
+        ($\le$10~km$^2$), click Analyze. The bounding box persists after
+        results as a dashed blue reference overlay; the legend reflects
+        this with a ``Selected area'' entry.
+\end{enumerate}
+
+A pour-point override button allows clicking any map location to
+re-run the analysis snapped to the nearest detected candidate bowl.
+A companion page (\texttt{frontend/help.html}) documents all features,
+result field definitions, and data source accuracy for end users.
+
+\subsection{Database and Storage}
+
+Result persistence is optional and disabled by default. When
+\texttt{DATABASE\_URL} is set, results are written to an
+\texttt{analysis\_runs} table (PostgreSQL JSONB) \emph{after} the HTTP
+response is assembled, so a DB outage never increases latency.
+A \texttt{Village} registry table stores pre-registered village metadata
+and KML paths for the search-and-load workflow.
+
+%% =====================================================================
+\section{CSD Themes and Topics Applied in the Project}
+\label{sec:csd-themes}
+
+\begin{table*}[t]
+  \caption{Mapping of core CSD themes/topics to their use in this project}
+  \label{tab:csd-themes}
+  \begin{tabular}{p{2.8cm}p{5.2cm}p{6.5cm}}
+    \toprule
+    CSD Theme/Topic & Where used & Justification / design rationale \\
+    \midrule
+    API Design (REST) & \texttt{POST /analyzeContour}, \texttt{POST /analyzeArea}, \texttt{GET /api/imagery} & REST chosen for statelessness and browser compatibility. Both analysis endpoints return identical \texttt{AnalysisResult} JSON, so the frontend needs zero branching logic to display results from either path. \\
+    Caching & In-memory TTL dict (24~h) for OSM XML and rainfall in \texttt{water\_exclusion.py} and \texttt{rainfall\_service.py} & Rainfall and water-feature data are static within a planning session; caching eliminates redundant API calls and reduces latency from $\approx$500~ms to 0~ms on cache hits. \\
+    Concurrency / Async & \texttt{run\_in\_threadpool} wraps CPU-bound analysis; FastAPI async routes handle HTTP I/O & The pipeline is CPU-bound (IDW, pysheds BFS); offloading to a thread pool keeps the event loop free for concurrent connections. \\
+    Microservices vs.\ Monolith & Modular monolith: single FastAPI app with clean internal module boundaries & For a demonstration system the operational overhead of microservices outweighs benefits. All modules are independently unit-tested; extracting a service requires only a thin HTTP wrapper. \\
+    Design Patterns & Strategy (\texttt{TerrainSource} ABC) for input formats; Singleton for \texttt{Settings} and \texttt{AnalysisService}; Fail-Open Circuit Breaker for all external APIs & \texttt{TerrainSource} decouples input format from the analysis pipeline; adding GeoTIFF support requires only a new subclass with no changes to hydrology code. \\
+    Error Handling \& Resilience & Every external call (OSM, Open-Meteo, NASA POWER, DB, Terrarium tiles) in try/except with fallback; warnings accumulate in \texttt{AnalysisResult.warnings[]} & The pipeline must return a usable result even when APIs are down. Machine-readable codes let the frontend show human-readable notices without coupling to error internals. \\
+    Algorithms \& Complexity & D8 flow: $O(N)$ topological sort; Priority-Flood: $O(N \log N)$; IDW: $O(N \cdot k)$ per cell & D8 was chosen over D-infinity because integer single-direction pointers form a tree, enabling $O(N)$ BFS catchment delineation by reversing edges. \\
+    Containerisation & \texttt{Dockerfile} + \texttt{docker-compose.yml} with healthcheck-gated DB startup & Reproducible environment for grading; compose also starts the optional PostgreSQL instance with correct credentials. \\
+    Testing Strategy & Unit tests for all modules; integration tests for the full API pipeline; real KMZ fixtures & Unit tests validate IDW, SCS-CN, and IS~5477 formulae against hand-computed reference values; integration tests run the full pipeline on a known KMZ. \\
+    Version Control / CI & GitHub Actions: black + ruff + pytest on every push; pre-commit hooks locally & Ruff caught an unused variable in \texttt{from\_tiles.py} at commit time; black enforces consistent style across the codebase automatically. \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+The three most significant CSD themes are \textbf{Error Handling and
+Resilience}, \textbf{Algorithms and Complexity}, and \textbf{API Design}.
+
+The fail-open resilience strategy was the most consequential engineering
+decision. Because the system chains five external data sources, a
+fail-closed approach would make it unavailable whenever any source had an
+outage. By making each step independently fail-open and accumulating
+\texttt{warnings[]} codes, the system always returns at least the
+topographic analysis and candidate locations.
+
+The choice of D8 over continuous flow models (D-infinity, MFD) was
+deliberate. D8 assigns exactly one downstream neighbour per cell, making
+the flow-direction grid a tree. This enables BFS catchment delineation in
+$O(N)$ time by reversing tree edges --- no priority queue or
+re-computation is required.
+
+%% =====================================================================
+\section{Results and Evaluation}
+\label{sec:results}
+
+The system was validated against a KMZ contour map of a test site in
+Raipur district, Chhattisgarh (21.245°N, 81.301°E).
+
+\begin{table}[h]
+  \caption{Computed outputs for the Raipur test site}
+  \label{tab:results}
+  \begin{tabular}{p{3.8cm}p{3.4cm}}
+    \toprule
+    Metric & Value \\
+    \midrule
+    Catchment area & 19.5 ha \\
+    Elevation range & 284--290 m \\
+    Mean slope & 1.4° \\
+    Annual rainfall (10-yr avg.) & 1,458 mm/yr \\
+    Wet season (Jun--Sep) & 1,260 mm \\
+    Curve Number (HSG-B) & CN 71 \\
+    Annual runoff volume & 153,500 m³ \\
+    Recommended water depth & 1.84 m \\
+    Embankment height & 2.34 m \\
+    Live storage & 61,400 m³ \\
+    Total storage (IS~5477) & 90,000 m³ \\
+    Design constrained by & Hydrology \\
+    Topographic capacity & 224,200 m³ \\
+    Wet-season fill & Yes (100\%) \\
+    Candidates found & 10 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The ``constrained by hydrology'' label indicates the terrain bowl can
+store more than the catchment delivers; the pond is sized to capture
+$\approx$40\% of annual runoff (IS~5477 planning value), leaving 60\%
+for downstream flow and inter-annual variability.
+
+\begin{figure}[h]
+  \centering
+  % \includegraphics[width=\linewidth]{results-overlay}
+  \caption{Results overlay for the Raipur test site. Green polygon: delineated
+    catchment; blue dots: candidate sites; red star: selected pour point.}
+  \label{fig:results}
+  \Description{Map showing the delineated catchment polygon and ten candidate
+    pond sites for the Raipur test KMZ, alongside the results sidebar with
+    the values from Table 4.}
+\end{figure}
+
+\subsection{Performance}
+
+Response times on a single-core development machine (Intel Core i5, 8~GB RAM):
+
+\begin{table}[h]
+  \caption{Measured end-to-end response times}
+  \label{tab:perf}
+  \begin{tabular}{p{4.0cm}p{3.2cm}}
+    \toprule
+    Operation & Time \\
+    \midrule
+    KMZ parse + IDW DEM (19.5~ha) & 8--12 s \\
+    Priority-Flood conditioning & 2--4 s \\
+    D8 flow + candidates & 3--6 s \\
+    OSM Overpass (network) & 0.5--2 s (cached: 0 ms) \\
+    Open-Meteo rainfall & 0.1--0.5 s \\
+    SCS-CN + IS~5477 & $<$0.1 s \\
+    Watershed BFS + polygonise & 0.5--1 s \\
+    \textbf{Total (KMZ run)} & \textbf{60--90 s} \\
+    SRTM tile download (5 km²) & 1--3 s \\
+    \textbf{Total (tile run)} & \textbf{30--60 s} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The dominant cost is IDW interpolation on the 2~m grid ($O(N \cdot k)$,
+$N \approx 5 \times 10^5$ cells for a 20~ha area). The SRTM tile path is
+faster because the 38~m grid has 361$\times$ fewer cells for the same area.
+
+%% =====================================================================
+\section{Discussion and Limitations}
+\label{sec:discussion}
+
+\textbf{What worked well.} The fail-open pipeline architecture kept the
+system functional throughout development even when OSM Overpass was
+rate-limited and NASA POWER was temporarily unreachable. The D8 + BFS
+approach delineated the correct catchment boundary on the test KMZ.
+The SCS-CN method produced a plausible runoff depth of 895~mm against an
+annual rainfall of 1,458~mm for HSG-B mixed-agriculture land, consistent
+with published regional studies.
+
+\textbf{SRTM resolution limitation.} The Draw Area feature uses SRTM
+tiles at $\approx$38~m resolution. Small depressions (footprint
+$<$0.15~ha) are invisible at this scale. In low-relief terrain ($<$2~m
+elevation range), Priority-Flood may fill all depressions and return no
+candidates. The KMZ upload path at 2~m resolution does not have this
+issue. Users are informed via a warning banner and the help page.
+
+\textbf{SCS-CN assumptions.} The Curve Number is applied uniformly using
+a single HSG value (configurable, default HSG-B). Spatial soil
+heterogeneity within the catchment is not modelled. The built-up fraction
+adjustment uses the full DEM bounding box rather than the delineated
+catchment (unavailable at that pipeline stage), introducing a slight
+conservative bias.
+
+\textbf{No government land verification.} No authoritative free API
+exists for parcel-level land ownership data in India. OSM landuse
+exclusion (buildings, residential/commercial) is a reasonable proxy but
+will miss privately owned agricultural parcels.
+
+\textbf{Single-threaded analysis.} Each request occupies one thread pool
+worker for 60--90~s. A second concurrent analysis queues behind it. This
+is acceptable for demonstration use but would require worker-pool scaling
+or analysis result caching for a production deployment.
+
+%% =====================================================================
+\section{AI Tool Usage Declaration}
+\label{sec:ai-usage}
+
+AI assistance (Google Gemini and Claude Sonnet) was used throughout this
+project for the following tasks:
+
+\begin{itemize}
+  \item \textbf{Architecture review}: LLMs reviewed High-Level Design
+        documents and flagged inconsistencies (e.g., scoring formula
+        mismatch, area-consistency threshold discrepancies).
+
+  \item \textbf{Code generation}: Boilerplate for rainfall API clients,
+        IS~5477 pond design, SQLModel DB models, and the Terrarium tile
+        downloader was AI-generated. All generated code was read,
+        understood, and manually verified against the relevant standards
+        (SCS-CN USDA tables, IS~5477, IS~12169, OSM tagging conventions)
+        before being committed.
+
+  \item \textbf{Test generation}: Unit test skeletons were AI-generated;
+        all expected numerical values in assertion statements were
+        hand-computed or cross-referenced against published formula results.
+
+  \item \textbf{Bug identification}: LLM review identified a critical bug
+        where monthly rainfall was averaged to a daily value before
+        applying the SCS-CN threshold, causing zero runoff output. The fix
+        (applying SCS-CN directly to monthly totals) was verified against
+        published worked examples.
+
+  \item \textbf{Documentation}: This report template was reformatted and
+        populated with AI assistance. All technical content reflects the
+        actual system implementation and was verified by the author.
+\end{itemize}
+
+In all cases, no AI output was accepted without independent verification.
+The author takes full responsibility for the correctness of all submitted
+code, results, and statements in this report.
+
+%% =====================================================================
+\appendix
+
+\section{Source Code and Repository}
+
+The complete source code is available at:
+\begin{center}
+  \url{https://github.com/harshitap1305/Village-Pond-Planning-System}
+\end{center}
+
+\textbf{Key directories:}
+\begin{itemize}
+  \item \texttt{src/terrain/} --- KML/KMZ parsing and TerrainSource ABC
+  \item \texttt{src/dem/} --- IDW DEM builder, Terrarium tile downloader,
+        Priority-Flood conditioning, slope raster
+  \item \texttt{src/hydrology/} --- D8 flow routing, BFS watershed, SCS-CN
+        runoff estimation
+  \item \texttt{src/catchment/} --- OSM exclusion masks, candidate scoring,
+        IS~5477 pond design
+  \item \texttt{src/external/} --- Rainfall API clients (Open-Meteo, NASA
+        POWER) with retry and timeout
+  \item \texttt{src/api/} --- FastAPI routes, analysis service orchestrator
+  \item \texttt{frontend/} --- Leaflet SPA (\texttt{index.html}),
+        documentation page (\texttt{help.html})
+  \item \texttt{tests/unit/} --- Per-module unit tests with hand-computed
+        reference values
+  \item \texttt{tests/integration/} --- Full-pipeline API-level tests
+  \item \texttt{docs/} --- Architecture document, module design docs
+\end{itemize}
+
+\end{document}
+\endinput

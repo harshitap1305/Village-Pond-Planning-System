@@ -2,7 +2,9 @@
 %% CSD Assignment 1 - Final Technical Report
 %% Based on the ACM "acmart" manuscript (single-column) style.
 %%
-\documentclass[manuscript,screen,review]{acmart}
+\documentclass[manuscript,screen,review,nonacm]{acmart}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, backgrounds, decorations.pathreplacing}
 
 \AtBeginDocument{%
   \providecommand\BibTeX{{Bib\TeX}}}
@@ -13,12 +15,12 @@
 \title{AI-based Village Pond Planning System}
 \subtitle{CSD Assignment 1 -- Final Technical Report}
 
-\author{Harshita Patidar}
+\author{Harshita Patidar -- 12340920}
 \affiliation{%
-  \institution{Your Institute / Department}
-  \city{Your City}
+  \institution{Indian Institute of Technology, Bhilai}%
+  \department{Department of Computer Science and Engineering}%
   \country{India}}
-\email{your.email@institute.ac.in}
+\email{harshitap@iitbhilai.ac.in}
 
 \renewcommand{\shortauthors}{Patidar}
 
@@ -33,7 +35,7 @@ Planning System that automates site selection using geospatial terrain
 analysis, satellite rainfall data, and classical civil engineering design
 standards. The system accepts either a user-supplied KMZ contour map or a
 user-drawn map rectangle (using free SRTM satellite elevation tiles), and
-runs a 15-step pipeline: DEM interpolation, Priority-Flood sink filling,
+runs a stepwise pipeline: DEM interpolation, Priority-Flood sink filling,
 D8 flow routing, OSM-based land exclusion, candidate depression scoring,
 SCS-CN runoff estimation, and IS~5477-compliant pond dimensioning. Results
 are visualised on an interactive Leaflet.js map with a full engineering
@@ -170,18 +172,35 @@ at a shared pipeline from sink-filling onward, avoiding code duplication.
 The only structural difference is how the DEM is built --- from IDW
 interpolation of KMZ contours, or from stitching Terrarium RGB PNG tiles.
 
-\begin{figure}[h]
-  \centering
-  % \includegraphics[width=\linewidth]{architecture-diagram}
-  \caption{High-level system architecture. Both analysis paths produce a
-    DEM object consumed by the shared 15-step pipeline.}
-  \label{fig:architecture}
-  \Description{Flow diagram: browser SPA sends POST /analyzeContour or
-    POST /analyzeArea to FastAPI. KMZ path: KMLTerrainSource + IDW to DEM.
-    Tile path: Terrarium tile download + decode to DEM. Shared pipeline:
-    Priority-Flood, D8 routing, OSM masks, candidates, rainfall, SCS-CN,
+
+
+% \caption{System architecture. Both input paths (KMZ upload and Draw Area
+%   SRTM tiles) produce a DEM that enters the shared hydrology pipeline.
+%   Dashed purple arrows denote external API calls, all wrapped in fail-open
+%   handlers with retry. The result is returned to the browser and
+%   optionally persisted in PostgreSQL.}
+% \label{fig:architecture}
+% \Description{Vertical flow diagram: Browser at top splits to KMZ Upload
+%   and Draw Area paths, each producing a DEM (IDW 2 m or SRTM 38 m).
+%   Both merge into FastAPI, then a shared pipeline of Priority-Flood,
+%   D8 flow routing, OSM exclusion, candidate scoring, rainfall retrieval,
+%   SCS-CN runoff, IS-5477 pond design, and BFS watershed delineation,
+%   outputting AnalysisResult JSON back to the browser and optionally
+%   to PostgreSQL. External APIs shown on the right.}
+
+ \begin{figure}[h]
+   \centering
+    \includegraphics[width=0.5\linewidth]{Screenshot from 2026-09-27 22-22-58.png}
+   \caption{High-level system architecture. Both analysis paths produce a
+     DEM object consumed by the shared pipeline.}
+   \label{fig:architecture}
+   \Description{Flow diagram: browser SPA sends POST /analyzeContour or
+     POST /analyzeArea to FastAPI. KMZ path: KMLTerrainSource + IDW to DEM.
+     Tile path: Terrarium tile download + decode to DEM. Shared pipeline:
+     Priority-Flood, D8 routing, OSM masks, candidates, rainfall, SCS-CN,
     IS-5477, BFS watershed, polygonise, AnalysisResult JSON to browser.}
-\end{figure}
+ \end{figure}
+
 
 \subsection{Technology Stack}
 
@@ -306,8 +325,8 @@ histogram. No build step or bundler is required.
 
 \begin{figure}[h]
   \centering
-  % \includegraphics[width=\linewidth]{ui-screenshot}
-  \caption{Application interface: satellite basemap with green catchment
+   \includegraphics[width=\linewidth]{Screenshot from 2026-09-27 22-32-53.png}
+  \caption{Application interface: satellite basemap with blue catchment
     polygon, blue candidate dots, red selected-site star, and dashed blue
     analysis area rectangle. The sidebar shows all results cards and the
     monthly rainfall bar chart.}
@@ -423,8 +442,8 @@ for downstream flow and inter-annual variability.
 
 \begin{figure}[h]
   \centering
-  % \includegraphics[width=\linewidth]{results-overlay}
-  \caption{Results overlay for the Raipur test site. Green polygon: delineated
+  \includegraphics[width=0.5\linewidth]{Screenshot from 2026-09-27 22-38-44.png}
+  \caption{Results overlay for the test site. Green polygon: delineated
     catchment; blue dots: candidate sites; red star: selected pour point.}
   \label{fig:results}
   \Description{Map showing the delineated catchment polygon and ten candidate
@@ -538,14 +557,30 @@ code, results, and statements in this report.
 %% =====================================================================
 \appendix
 
-\section{Source Code and Repository}
+\section{Source Code, Demo, and Deployment}
 
-The complete source code is available at:
+\subsection*{Source Code (GitHub)}
+The complete source code is publicly available at:
 \begin{center}
   \url{https://github.com/harshitap1305/Village-Pond-Planning-System}
 \end{center}
 
-\textbf{Key directories:}
+\subsection*{Live Deployed Application}
+A live instance of the system is hosted at:
+\begin{center}
+  \url{https://YOUR-DEPLOYED-URL-HERE}  %% TODO: replace with your actual deployment URL
+\end{center}
+(e.g.\ a Render, Railway, or Hugging Face Spaces deployment)
+
+\subsection*{Video Demo (YouTube)}
+A walkthrough demonstration of the system is available at:
+\begin{center}
+  \url{https://www.youtube.com/watch?v=YOUR-VIDEO-ID}  %% TODO: replace after uploading
+\end{center}
+The video covers: uploading a KMZ file, using the Draw Area tool, reading
+the pond design results, and the pour-point override feature.
+
+\subsection*{Key Repository Directories}
 \begin{itemize}
   \item \texttt{src/terrain/} --- KML/KMZ parsing and TerrainSource ABC
   \item \texttt{src/dem/} --- IDW DEM builder, Terrarium tile downloader,
@@ -562,7 +597,8 @@ The complete source code is available at:
   \item \texttt{tests/unit/} --- Per-module unit tests with hand-computed
         reference values
   \item \texttt{tests/integration/} --- Full-pipeline API-level tests
-  \item \texttt{docs/} --- Architecture document, module design docs
+  \item \texttt{docs/} --- Architecture document, module design docs,
+        this report
 \end{itemize}
 
 \end{document}

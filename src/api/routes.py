@@ -59,12 +59,19 @@ async def analyze_contour(
     request: Request,
     contour_map: UploadFile,
     cell_size: float | None = None,
+    pour_lat: float | None = None,
+    pour_lon: float | None = None,
 ) -> AnalysisResult:
     """
     Run the full village pond analysis pipeline.
 
     - **contour_map**: KML or KMZ file containing elevation contour lines.
     - **cell_size**: Optional DEM grid resolution override in metres (default: 2.0 m).
+    - **pour_lat**: Optional latitude for manual pour-point override (WGS84). When
+      provided together with ``pour_lon``, the selected site is the auto-detected
+      candidate nearest to this coordinate instead of the highest-scoring one. The
+      override is recorded in ``AnalysisResult.warnings`` as ``pour_point_overridden``.
+    - **pour_lon**: Optional longitude for manual pour-point override (WGS84).
     """
     # Reject oversized files before reading content into memory
     content_length = request.headers.get("content-length")
@@ -82,6 +89,8 @@ async def analyze_contour(
         contents,
         contour_map.filename or "upload.kml",
         cell_size,
+        pour_lat,
+        pour_lon,
     )
 
     # ── Module 8: Persist result if DB is configured ──────────────────────

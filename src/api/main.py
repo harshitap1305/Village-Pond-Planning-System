@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from src.api.error_handlers import register_error_handlers
+from src.api.imagery import router as imagery_router
 from src.api.routes import router
 from src.config import settings
 from src.db.engine import create_db_tables, dispose_engine, init_engine
@@ -63,6 +64,7 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(imagery_router, prefix="/api", tags=["Imagery"])
 register_error_handlers(app)
 
 # Serve the frontend SPA at "/".

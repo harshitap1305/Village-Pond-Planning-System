@@ -82,6 +82,8 @@ class AnalysisService:
         file_bytes: bytes,
         filename: str,
         cell_size: float | None = None,
+        pour_lat: float | None = None,
+        pour_lon: float | None = None,
     ) -> AnalysisResult:
         """
         Run the full analysis pipeline on a KML/KMZ upload.
@@ -91,6 +93,13 @@ class AnalysisService:
             filename:   Original filename (used for format detection).
             cell_size:  Optional DEM cell size override in metres. Defaults to
                         settings.cell_size_m if None.
+            pour_lat:   Optional latitude for manual pour-point override.
+                        When provided (with pour_lon), the pipeline selects the
+                        auto-detected candidate nearest to this coordinate instead
+                        of always choosing candidates[0] (the highest-scoring one).
+                        The snap is documented in AnalysisResult.warnings.
+            pour_lon:   Optional longitude for manual pour-point override.
+                        Must be provided together with pour_lat.
 
         Returns:
             AnalysisResult containing candidates, polygon, metrics, and
@@ -211,7 +220,26 @@ class AnalysisService:
                 "The terrain may have no closed depressions larger than "
                 "min_depression_area_sqm with catchment >= min_catchment_area_ha."
             )
-        selected = candidates[0]
+
+        # ── Pour-point override: snap to nearest auto-detected candidate ──────
+        # When a user specifies a manual pour point we do NOT use an arbitrary
+        # DEM cell — we snap to the nearest existing candidate bowl. This keeps
+        # all downstream calculations (watershed, pond design) grounded in a
+        # real topographic depression, and is disclosed in the warnings list.
+        if pour_lat is not None and pour_lon is not None:
+            selected = _find_nearest_candidate(candidates, pour_lat, pour_lon)
+            _warnings.append("pour_point_overridden")
+            _log.info(
+                "Pour-point override: user=(%.6f, %.6f) → snapped to candidate (%.6f, %.6f) score=%.4f",
+                pour_lat,
+                pour_lon,
+                selected.lat,
+                selected.lon,
+                selected.score,
+            )
+        else:
+            selected = candidates[0]
+
         _log.info(
             "Found %d candidates; selected lat=%.6f lon=%.6f score=%.4f",
             len(candidates),
@@ -365,3 +393,28 @@ class AnalysisService:
 
 # Module-level singleton — import this in routes.py
 analysis_service = AnalysisService()
+
+
+def _find_nearest_candidate(
+    candidates: list,
+    lat: float,
+    lon: float,
+) -> object:
+    """
+    Snap a user-specified map click to the nearest auto-detected candidate.
+
+    Uses simple Euclidean distance in lat/lon space — acceptable here because
+    the DEM footprint is small (< 10 km) and the CRS distortion is negligible
+    at Indian latitudes compared to the diameter of typical candidate clusters.
+
+    Args:
+        candidates: Ranked list of CandidatePoint objects from find_candidates().
+        lat:        User-clicked latitude in WGS84 decimal degrees.
+        lon:        User-clicked longitude in WGS84 decimal degrees.
+
+    Returns:
+        The candidate whose (lat, lon) is closest to the clicked point.
+    """
+    import math
+
+    return min(candidates, key=lambda c: math.hypot(c.lat - lat, c.lon - lon))

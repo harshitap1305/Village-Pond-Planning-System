@@ -253,6 +253,27 @@
     }
     .btn-retry:hover { opacity: 0.85; }
 
+    /* ─── Pour-Point Override button ─────────────────────────────── */
+    .btn-override {
+      width: 100%;
+      padding: 9px 14px;
+      background: var(--surface);
+      color: var(--accent-dark);
+      border: 1.5px solid var(--accent);
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      font-family: inherit;
+      margin-bottom: 8px;
+      display: block;
+    }
+    .btn-override:hover { background: var(--accent-light); }
+    .btn-override.active { background: var(--accent); color: white; }
+    #map-container.picking { cursor: crosshair !important; }
+    #map-container.picking #map { cursor: crosshair !important; }
+
     /* ─── Unavailable message ────────────────────────────────────── */
     .muted-msg {
       font-size: 12px;
@@ -407,6 +428,12 @@
     <!-- Results (hidden until analysis completes) -->
     <div id="results" hidden>
 
+      <!-- Override pour-point button -->
+      <div id="override-zone" style="margin-bottom:10px;">
+        <button id="btn-override" class="btn-override">📍 Click map to override pour point</button>
+        <p id="override-hint" class="muted-msg" hidden>Click anywhere on the map to re-run from that point. Press <kbd>Esc</kbd> to cancel.</p>
+      </div>
+
       <!-- Warnings banner -->
       <div id="warnings" hidden></div>
 
@@ -503,6 +530,8 @@
       'Monthly rainfall data missing; runoff estimated using annual average (rational method — less precise).',
     'pond_design_unavailable':
       'Pond design skipped (requires runoff estimate).',
+    'pour_point_overridden':
+      'Manual pour-point override active — selected site snapped to nearest auto-detected candidate bowl.',
   };
 
   /* ─── DOM refs ───────────────────────────────────────────────── */
@@ -520,6 +549,11 @@
   const rainfallEl    = document.getElementById('rainfall-details');
   const pondEl        = document.getElementById('pond-details');
   const metaEl        = document.getElementById('meta-details');
+
+  const overrideZone  = document.getElementById('override-zone');
+  const btnOverride   = document.getElementById('btn-override');
+  const overrideHint  = document.getElementById('override-hint');
+  const mapContainer  = document.getElementById('map-container');
 
   // Update upload hint with the configured size limit
   document.getElementById('upload-hint').textContent =
@@ -592,11 +626,40 @@
   const map = L.map('map', { zoomControl: true, preferCanvas: false })
                .setView([MAP_VIEW[0], MAP_VIEW[1]], MAP_VIEW[2]);
 
-  L.tileLayer(TILE_URL, {
-    attribution: TILE_ATTR,
-    subdomains: 'abcd',
-    maxZoom: 20,
-  }).addTo(map);
+  /* ─── Module 10: Dynamic basemap layers ──────────────────────── */
+  async function initBaseLayers() {
+    const [satMeta, streetMeta] = await Promise.all([
+      fetch(`${API_BASE_URL}/api/imagery?provider=esri_satellite`).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`${API_BASE_URL}/api/imagery?provider=carto_light`).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]);
+
+    const streetLayer = L.tileLayer(
+      streetMeta ? streetMeta.url_template : TILE_URL,
+      {
+        attribution: streetMeta ? streetMeta.attribution : TILE_ATTR,
+        subdomains:  streetMeta ? (streetMeta.subdomains || '') : 'abcd',
+        maxZoom:     streetMeta ? streetMeta.max_zoom : 20,
+      }
+    );
+    streetLayer.addTo(map);
+
+    if (satMeta) {
+      const satLayer = L.tileLayer(satMeta.url_template, {
+        attribution: satMeta.attribution,
+        maxZoom:     satMeta.max_zoom,
+      });
+      L.control.layers(
+        { '\uD83D\uDDFA\uFE0F Street': streetLayer, '\uD83D\uDEF0 Satellite': satLayer },
+        {},
+        { position: 'topright', collapsed: false }
+      ).addTo(map);
+    }
+  }
+
+  // Init — fall back to static tile URL if API is unavailable
+  initBaseLayers().catch(() => {
+    L.tileLayer(TILE_URL, { attribution: TILE_ATTR, subdomains: 'abcd', maxZoom: 20 }).addTo(map);
+  });
 
   /* ─── Layer handles ──────────────────────────────────────────── */
   let kmlLayer       = null;
@@ -630,6 +693,66 @@
       cursor:pointer;">★</div>`,
   });
 
+  /* ─── Module 11: Pour-point override state ───────────────────── */
+  let overrideMode     = false;
+  let lastUploadedFile = null;  // cache so we can re-submit on override
+
+  function enterOverrideMode() {
+    overrideMode = true;
+    btnOverride.classList.add('active');
+    btnOverride.textContent = '✕ Cancel override (Esc)';
+    overrideHint.hidden = false;
+    mapContainer.classList.add('picking');
+  }
+
+  function cancelOverrideMode() {
+    overrideMode = false;
+    btnOverride.classList.remove('active');
+    btnOverride.textContent = '📍 Click map to override pour point';
+    overrideHint.hidden = true;
+    mapContainer.classList.remove('picking');
+  }
+
+  btnOverride.addEventListener('click', () => {
+    if (overrideMode) cancelOverrideMode();
+    else enterOverrideMode();
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && overrideMode) cancelOverrideMode();
+  });
+
+  map.on('click', async (e) => {
+    if (!overrideMode || !lastUploadedFile) return;
+    cancelOverrideMode();
+
+    const { lat, lng } = e.latlng;
+    clearPreviousLayers();
+    resultsEl.hidden = true;
+    legendEl.hidden = true;
+    warningsEl.hidden = true;
+    showLoading(true);
+
+    const form = new FormData();
+    form.append('contour_map', lastUploadedFile);
+
+    try {
+      const url = `${API_BASE_URL}/analyzeContour?pour_lat=${lat.toFixed(7)}&pour_lon=${lng.toFixed(7)}`;
+      const resp = await fetch(url, { method: 'POST', body: form });
+      if (!resp.ok) {
+        let msg = `HTTP ${resp.status}`;
+        try { msg = (await resp.json()).detail || msg; } catch (_) {}
+        showError(msg);
+        return;
+      }
+      renderResult(await resp.json());
+    } catch (err) {
+      showError('Network error during override analysis.');
+    } finally {
+      showLoading(false);
+    }
+  });
+
   /* ─── Upload interactions ────────────────────────────────────── */
   uploadZone.addEventListener('click', () => fileInput.click());
   uploadZone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
@@ -645,8 +768,10 @@
 
   /* ─── Main file handler ──────────────────────────────────────── */
   async function handleFile(file) {
+    lastUploadedFile = file;  // cache for pour-point override re-use
     fileNameEl.textContent = file.name;
     clearPreviousLayers();
+    cancelOverrideMode();
     resultsEl.hidden = true;
     legendEl.hidden  = true;
     warningsEl.hidden = true;
@@ -710,6 +835,7 @@
 
     resultsEl.hidden = false;
     legendEl.hidden  = false;
+    overrideZone.hidden = false;  // Module 11: reveal override button
   }
 
   /* ─── Map layer rendering ────────────────────────────────────── */

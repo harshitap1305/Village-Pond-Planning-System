@@ -139,3 +139,112 @@ async def get_result(result_id: uuid.UUID) -> AnalysisResult:
     if run is None:
         raise HTTPException(status_code=404, detail=f"Result {result_id} not found.")
     return AnalysisResult.model_validate(run.result_json)
+
+
+@router.get(
+    "/village/search",
+    summary="Search for villages by name",
+    responses={
+        503: {"description": "Database not configured"},
+    },
+)
+async def search_villages(q: str):
+    """
+    Search for registered villages by name (case-insensitive).
+    """
+    if not is_db_configured():
+        raise HTTPException(status_code=503, detail="Database not configured")
+
+    from sqlmodel import select
+
+    from src.db.models import Village
+
+    async with get_async_session() as session:
+        # Simple ilike search
+        statement = select(Village).where(Village.name.ilike(f"%{q}%")).limit(10)
+        result = await session.execute(statement)
+        villages = result.scalars().all()
+
+    return [
+        {
+            "id": str(v.id),
+            "name": v.name,
+            "state": v.state,
+            "district": v.district,
+            "latitude": v.latitude,
+            "longitude": v.longitude,
+        }
+        for v in villages
+    ]
+
+
+@router.get(
+    "/village/{village_id}",
+    summary="Get village metadata",
+    responses={
+        404: {"description": "Village not found"},
+        503: {"description": "Database not configured"},
+    },
+)
+async def get_village(village_id: uuid.UUID):
+    """
+    Get metadata for a specific registered village.
+    """
+    if not is_db_configured():
+        raise HTTPException(status_code=503, detail="Database not configured")
+
+    from src.db.models import Village
+
+    async with get_async_session() as session:
+        village = await session.get(Village, village_id)
+
+    if village is None:
+        raise HTTPException(status_code=404, detail="Village not found")
+
+    return {
+        "id": str(village.id),
+        "name": village.name,
+        "state": village.state,
+        "district": village.district,
+        "latitude": village.latitude,
+        "longitude": village.longitude,
+    }
+
+
+@router.get(
+    "/village/{village_id}/kml",
+    summary="Get the static KML file for a village",
+    responses={
+        404: {"description": "Village or KML file not found"},
+        503: {"description": "Database not configured"},
+    },
+)
+async def get_village_kml(village_id: uuid.UUID):
+    """
+    Download the KML contour file associated with a registered village.
+    """
+    if not is_db_configured():
+        raise HTTPException(status_code=503, detail="Database not configured")
+
+    import os
+
+    from fastapi.responses import FileResponse
+
+    from src.db.models import Village
+
+    async with get_async_session() as session:
+        village = await session.get(Village, village_id)
+
+    if village is None:
+        raise HTTPException(status_code=404, detail="Village not found")
+
+    kml_path = os.path.join(os.getcwd(), village.kml_path)
+    if not os.path.exists(kml_path):
+        _log.error(f"KML file missing for village {village.id} at {kml_path}")
+        raise HTTPException(status_code=404, detail="KML file missing on server")
+
+    return FileResponse(
+        path=kml_path,
+        media_type="application/vnd.google-earth.kml+xml",
+        filename=os.path.basename(kml_path),
+    )

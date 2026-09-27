@@ -57,3 +57,22 @@ class AnalysisRun(SQLModel, table=True):
         default_factory=lambda: datetime.now(timezone.utc),
         description="UTC timestamp when the analysis completed.",
     )
+
+
+class Village(SQLModel, table=True):
+    """Seedable registry of villages for quick selection."""
+
+    __tablename__ = "village"
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        primary_key=True,
+    )
+    name: str = Field(index=True, max_length=255)
+    state: str = Field(max_length=255)
+    district: str = Field(max_length=255)
+    latitude: float
+    longitude: float
+    kml_path: str = Field(
+        description="Path to static KML file relative to project root"
+    )

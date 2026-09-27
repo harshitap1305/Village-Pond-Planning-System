@@ -136,8 +136,7 @@ into a runoff volume.
 ### Module 5 — Unified Response Assembly
 
 **Goal:** Requirement #8 — wire Modules 1-4 into the existing `analysis_service.run()` so
-`POST /analyzeContour` (or a renamed `/api/analyze` if you have time to update the frontend to
-match — otherwise don't rename, minimize churn) returns everything in one call.
+`POST /analyzeContour` returns everything in one call.
 
 **What to do:**
 1. Extend `AnalysisResult` (in `src/schemas/response.py`) with `rainfall: RainfallStats`,
@@ -156,7 +155,7 @@ true** — one API call, one response, everything the frontend needs to render.
 
 ## TIER 2 — Needed for a complete, credible submission
 
-### Module 6 — Minimal Frontend (map + upload + results overlay)
+### Module 6 — Frontend (map + upload + results overlay)
 
 **Goal:** You need *a* frontend — the assignment requires one, and it's graded (5 marks
 frontend/visualization, but also affects "system functionality" credibility in the demo). Given
@@ -204,14 +203,10 @@ one being slow/down doesn't take down the whole `/analyzeContour` call.
 
 ---
 
-### Module 8 — Persistence (only if time allows — otherwise document as future work)
+### Module 8 — Persistence
 
 **Goal:** `/api/results/{id}` and a village registry, matching your HLD's PostgreSQL/PostGIS choice.
 
-**Honest scoping note given the timeline:** this is the first module I'd cut if you're truly
-down to ~1 day. A stateless API that returns everything in one response (Module 5) already
-satisfies the assignment's functional requirements without a database. Persistence is valuable
-for "System Design and Management" marks but isn't blocking a working demo.
 
 **If you do have time:**
 1. `docker-compose.yml`: add a `postgres` service (you don't have one yet — currently just the

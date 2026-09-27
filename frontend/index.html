@@ -386,6 +386,13 @@
   </div>
 
   <div id="sidebar-body">
+    <!-- Village search zone -->
+    <div id="village-search-zone" style="margin-bottom: 16px; position: relative;">
+      <label for="village-search" style="font-size: 12px; font-weight: 600; color: var(--text); display: block; margin-bottom: 6px;">Search Predefined Village</label>
+      <input type="text" id="village-search" placeholder="E.g., Test Village..." autocomplete="off" style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; font-family: inherit; outline: none; transition: border-color 0.15s;" />
+      <ul id="village-results" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-md); list-style: none; margin: 4px 0 0 0; padding: 0; max-height: 200px; overflow-y: auto; z-index: 100;"></ul>
+    </div>
+
     <!-- Upload zone -->
     <div id="upload-zone" role="button" tabindex="0"
          aria-label="Upload KML or KMZ contour file">
@@ -499,6 +506,8 @@
   };
 
   /* ─── DOM refs ───────────────────────────────────────────────── */
+  const searchInput   = document.getElementById('village-search');
+  const searchResults = document.getElementById('village-results');
   const uploadZone    = document.getElementById('upload-zone');
   const fileInput     = document.getElementById('file-input');
   const fileNameEl    = document.getElementById('file-name');
@@ -515,6 +524,68 @@
   // Update upload hint with the configured size limit
   document.getElementById('upload-hint').textContent =
     `or click to browse your files · max ${MAX_UPLOAD_MB} MB`;
+
+  /* ─── Village Search Logic ───────────────────────────────────── */
+  let searchTimeout = null;
+
+  searchInput.addEventListener('input', (e) => {
+    const q = e.target.value.trim();
+    if (q.length < 2) {
+      searchResults.style.display = 'none';
+      return;
+    }
+
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(async () => {
+      try {
+        const resp = await fetch(`${API_BASE_URL}/village/search?q=${encodeURIComponent(q)}`);
+        if (!resp.ok) return;
+        const villages = await resp.json();
+
+        if (villages.length === 0) {
+          searchResults.innerHTML = '<li style="padding: 10px 12px; font-size: 13px; color: var(--text-muted);">No villages found</li>';
+        } else {
+          searchResults.innerHTML = villages.map(v => `
+            <li data-id="${v.id}" class="village-item" style="padding: 10px 12px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #F1F5F9; transition: background 0.15s;">
+              <strong style="color: var(--text);">${v.name}</strong><br>
+              <span style="color: var(--text-muted); font-size: 11px;">${v.district}, ${v.state}</span>
+            </li>
+          `).join('');
+
+          document.querySelectorAll('.village-item').forEach(item => {
+            item.addEventListener('mouseenter', e => e.currentTarget.style.background = 'var(--accent-light)');
+            item.addEventListener('mouseleave', e => e.currentTarget.style.background = 'transparent');
+            item.addEventListener('click', () => loadVillage(item.dataset.id, item.querySelector('strong').textContent));
+          });
+        }
+        searchResults.style.display = 'block';
+      } catch (err) {
+        console.error('Village search failed:', err);
+      }
+    }, 300); // 300ms debounce
+  });
+
+  // Hide results when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#village-search-zone')) {
+      searchResults.style.display = 'none';
+    }
+  });
+
+  async function loadVillage(id, name) {
+    searchResults.style.display = 'none';
+    searchInput.value = name;
+
+    try {
+      const resp = await fetch(`${API_BASE_URL}/village/${id}/kml`);
+      if (!resp.ok) throw new Error("Could not fetch KML for village");
+      const blob = await resp.blob();
+      const file = new File([blob], `${name}.kml`, { type: "application/vnd.google-earth.kml+xml" });
+      handleFile(file);
+    } catch (err) {
+      showError("Failed to load village data. " + err.message);
+    }
+  }
 
 
   /* ─── Map setup ──────────────────────────────────────────────── */

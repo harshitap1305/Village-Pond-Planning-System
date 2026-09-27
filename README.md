@@ -9,6 +9,7 @@
 | URL | Description |
 |---|---|
 | `POST /analyzeContour` | Upload a KML/KMZ → get candidates + catchment |
+| `POST /analyzeArea` | Draw a bounding box → auto-download SRTM tiles → get candidates + catchment |
 | `GET /docs` | Interactive Swagger UI |
 | `GET /health` | Health check |
 | `GET /api/imagery` | Basemap tile metadata (satellite/street) |
@@ -19,7 +20,7 @@
 
 ## What it Produces
 
-Upload a KML/KMZ contour file for any village area and receive a structured JSON response containing:
+Upload a KML/KMZ contour file **or draw an area on the map** and receive a structured JSON response containing:
 
 - **Ranked pond candidate locations** — lat/lon, depression depth, estimated storage volume, and a normalized catchment score
 - **Catchment watershed polygon** (GeoJSON, WGS84) — ready to render on any mapping library
@@ -115,6 +116,7 @@ Reconciles hydrological supply with topographic capacity using **IS 5477 (Indian
 | **API** | Python 3.12 · FastAPI · uvicorn · Starlette |
 | **Geospatial** | NumPy · SciPy · PyProj · Shapely · pysheds · Rasterio |
 | **KML Parsing** | lxml · fastkml |
+| **Tile DEM** | Pillow (PNG decode) · httpx — downloads free AWS Terrarium SRTM tiles |
 | **HTTP Clients** | httpx (async) with retry + timeout hardening |
 | **Persistence** | SQLModel + PostgreSQL (JSONB) · SQLite (test fallback via `JSONVariant`) |
 | **Config** | pydantic-settings (12-factor env-based, `.env` file) |
@@ -260,13 +262,15 @@ Retrieve a previously saved analysis result by UUID.
 
 The web UI at `http://localhost:8000/` provides:
 
-- **Upload KML/KMZ** — drag-and-drop or click-to-browse
+- **Upload KML/KMZ** — drag-and-drop or click-to-browse, contour lines previewed on map
+- **Draw Area on Map** — click-drag to draw a bounding box (max 10 sq km, configurable); system auto-downloads free SRTM tiles and runs full analysis; drawn boundary stays visible after results as a reference overlay
 - **Village search** — type-ahead search across the registered village registry
-- **Live map** with Leaflet: catchment polygon, candidate markers, selected site star
-- **Basemap switcher** — 🗺 Street / 🛰 Satellite toggle (Module 10)
-- **Pour-point override** — click "📍 Override pour point", then click any map location to re-run with a user-chosen site (Module 11)
+- **Live map** with Leaflet: catchment polygon, candidate markers, selected site star, area boundary box
+- **Basemap switcher** — 🗺 Street / 🛰 Satellite toggle
+- **Pour-point override** — click "📍 Override pour point", then click any map location to re-run with a user-chosen site
 - **Results sidebar** — site coordinates, catchment stats, monthly rainfall chart, pond design card
-- **Warnings banner** — human-readable degradation notices
+- **Warnings banner** — human-readable degradation notices (including low-resolution SRTM alert for tile-based analyses)
+- **How it Works page** — `frontend/help.html` documents the full pipeline, result meanings, and system design
 
 ---
 
@@ -276,13 +280,17 @@ The web UI at `http://localhost:8000/` provides:
 src/
 ├── api/
 │   ├── main.py               # FastAPI app, lifespan, router registration
-│   ├── routes.py             # POST /analyzeContour, GET /health, GET /results/{id}
-│   ├── imagery.py            # GET /api/imagery (Module 10)
-│   ├── analysis_service.py   # Orchestrator — wires 15-step pipeline
+│   ├── routes.py             # POST /analyzeContour, POST /analyzeArea, GET /health, GET /results/{id}
+│   ├── imagery.py            # GET /api/imagery
+│   ├── analysis_service.py   # Orchestrator — run() for KML, run_from_dem() for tile DEM
 │   └── error_handlers.py     # Structured HTTP error responses
 ├── terrain/                  # KML/KMZ parsing, TerrainSource ABC
 ├── geometry/                 # Point cloud + UTM reprojection
-├── dem/                      # IDW interpolation, sink-filling, slope
+├── dem/
+│   ├── builder.py            # IDW interpolation (KML path)
+│   ├── from_tiles.py         # AWS Terrarium tile download + decode (Draw Area path)
+│   ├── conditioning.py       # Priority-Flood sink-filling
+│   └── slope.py              # Slope raster computation
 ├── hydrology/                # D8 flow, accumulation, watershed BFS
 │   ├── rainfall_stats.py     # RainfallStats schema
 │   └── runoff.py             # SCS-CN runoff estimation
@@ -305,7 +313,8 @@ src/
 └── config.py                 # Central pydantic-settings config (50+ fields)
 
 frontend/
-├── index.html                # Single-page app (Leaflet + Chart.js)
+├── index.html                # Single-page app (Leaflet + Chart.js + Draw Area tool)
+├── help.html                 # System documentation page
 └── env.js                    # Runtime config injection (API_BASE_URL, etc.)
 
 tests/
@@ -330,6 +339,7 @@ All settings live in `src/config.py` and are overridable via environment variabl
 |---|---|---|
 | `DATABASE_URL` | *(unset)* | PostgreSQL connection string; omit for DB-less mode |
 | `MAX_UPLOAD_MB` | `20` | File upload size limit |
+| `MAX_AREA_SELECTION_SQKM` | `10` | Max bounding box area for the Draw Area feature |
 | `CELL_SIZE_M` | `2.0` | DEM grid resolution in metres |
 | `MIN_CATCHMENT_AREA_HA` | `1.0` | Minimum catchment to report a candidate |
 | `MIN_DEPRESSION_AREA_SQM` | `100` | Minimum bowl area to consider |
@@ -351,6 +361,7 @@ Frontend variables (in `frontend/env.js`):
 | `MAP_INITIAL_VIEW` | `[22.5, 80.0, 5]` | Map centre and zoom on load |
 | `WET_SEASON_MONTHS` | `[5,6,7,8]` | Highlighted months on rainfall chart |
 | `MAX_UPLOAD_MB` | `20` | Client-side upload size hint |
+| `MAX_AREA_SELECTION_SQKM` | `10` | Max bounding box the Draw Area tool allows |
 
 ---
 
@@ -359,14 +370,16 @@ Frontend variables (in `frontend/env.js`):
 | Feature | Status |
 |---|---|
 | KML/KMZ parsing + DEM | ✅ Fully implemented & tested |
+| **Draw Area on Map (SRTM tiles)** | ✅ Free AWS Terrarium tiles, ~38 m res, no key required |
 | OSM water/land exclusion | ✅ Fully implemented & tested (fail-open) |
 | Rainfall (Open-Meteo + NASA POWER) | ✅ Implemented with retry + failover |
 | SCS-CN runoff estimation | ✅ Implemented & tested |
 | IS 5477 pond design | ✅ Implemented & tested |
-| Pour-point override (Module 11) | ✅ Implemented — snap to nearest candidate |
-| Satellite imagery endpoint (Module 10) | ✅ Implemented — 3 tile providers |
+| Pour-point override | ✅ Implemented — snap to nearest candidate |
+| Satellite imagery endpoint | ✅ Implemented — 3 tile providers |
 | Persistence (PostgreSQL JSONB) | ✅ Implemented — fail-open, result_id in response |
 | Village registry + search | ✅ Implemented — `/api/village/search`, `/api/village/{id}/kml` |
+| System documentation page | ✅ `frontend/help.html` — pipeline, result definitions, data flow |
 | Docker deployment | ✅ `docker compose up --build` |
 | CI (GitHub Actions) | ✅ black + ruff + pytest on every push |
 

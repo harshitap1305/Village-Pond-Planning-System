@@ -534,6 +534,10 @@
       <span class="legend-line"></span>
       <span>Input contours (KML)</span>
     </div>
+    <div class="legend-item" id="legend-bbox" hidden>
+      <span style="width:24px;height:12px;border:1.5px dashed #0EA5E9;display:inline-block;flex-shrink:0;border-radius:2px;"></span>
+      <span>Selected area</span>
+    </div>
   </div>
 </main>
 
@@ -707,6 +711,7 @@
   let candidatesLayer= null;
   let selectedMarker = null;
   let rainfallChart  = null;
+  let bboxLayer      = null;  // drawn area boundary — persists after analysis
 
   /* ─── Custom marker icons ────────────────────────────────────── */
   function makeDotIcon(color, size = 14) {
@@ -953,7 +958,16 @@
     const { south, west, north, east } = drawnBbox;
 
     clearPreviousLayers();
-    if (drawRect) { map.removeLayer(drawRect); drawRect = null; }
+    // Save drawn rect as the bbox reference layer before clearing state
+    if (drawRect) {
+      bboxLayer = drawRect;
+      drawRect = null;
+      // Restyle to a clean reference boundary (dashed, thin, neutral blue)
+      bboxLayer.setStyle({
+        color: '#0EA5E9', weight: 1.5, dashArray: '8 5',
+        fillColor: '#0EA5E9', fillOpacity: 0.04,
+      });
+    }
     cancelOverrideMode();
     resultsEl.hidden = true;
     legendEl.hidden  = true;
@@ -1049,6 +1063,8 @@
     resultsEl.hidden = false;
     legendEl.hidden  = false;
     overrideZone.hidden = false;  // Module 11: reveal override button
+    // Show "Selected area" legend entry only for the Draw Area path
+    document.getElementById('legend-bbox').hidden = !bboxLayer;
   }
 
   /* ─── Map layer rendering ────────────────────────────────────── */
@@ -1342,10 +1358,10 @@
   }
 
   function clearPreviousLayers() {
-    [kmlLayer, catchmentLayer, candidatesLayer, selectedMarker].forEach(l => {
+    [kmlLayer, catchmentLayer, candidatesLayer, selectedMarker, bboxLayer].forEach(l => {
       if (l) { try { map.removeLayer(l); } catch(_) {} }
     });
-    kmlLayer = catchmentLayer = candidatesLayer = selectedMarker = null;
+    kmlLayer = catchmentLayer = candidatesLayer = selectedMarker = bboxLayer = null;
     if (rainfallChart) { rainfallChart.destroy(); rainfallChart = null; }
   }
 

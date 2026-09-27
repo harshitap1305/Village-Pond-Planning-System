@@ -244,33 +244,68 @@
     <!-- Section 2: How to Use -->
     <section class="section">
       <h2 class="section-title">🖱️ How to Use It</h2>
+      <p>There are <strong>two ways</strong> to start an analysis. Both return the same results:</p>
+
+      <h3 style="font-size: 15px; font-weight: 700; margin: 20px 0 12px; color: var(--text);">Option A — Upload a KMZ Contour File</h3>
       <div class="flow-steps">
         <div class="flow-step">
           <div class="step-number">1</div>
           <div class="step-content">
             <h4>Upload your Terrain Data</h4>
-            <p>Drag and drop a <code>.kml</code> or <code>.kmz</code> file containing contour lines into the sidebar. The system requires accurate topography to work.</p>
+            <p>Drag and drop a <code>.kml</code> or <code>.kmz</code> file containing contour lines into the sidebar. The system requires accurate topography to work. This is the highest-precision input method (~1–2 m resolution).</p>
           </div>
         </div>
         <div class="flow-step">
           <div class="step-number">2</div>
           <div class="step-content">
-            <h4>Wait for AI Analysis</h4>
-            <p>The backend will take ~60 seconds to build a 3D model, simulate water flow, exclude built-up lands, fetch satellite weather data, and generate pond dimensions.</p>
+            <h4>Wait for AI Analysis (~60–90 s)</h4>
+            <p>The backend builds a 3D terrain model, simulates water flow, excludes built-up lands, fetches satellite weather data, and designs the pond.</p>
           </div>
         </div>
         <div class="flow-step">
           <div class="step-number">3</div>
           <div class="step-content">
             <h4>Review the Optimal Site (★)</h4>
-            <p>The map will center on the best pond location (marked with a red star). The sidebar will populate with the exact engineering metrics needed to construct the pond.</p>
+            <p>The map centers on the best pond location. The sidebar populates with full engineering metrics.</p>
           </div>
         </div>
         <div class="flow-step">
           <div class="step-number">4</div>
           <div class="step-content">
             <h4>Manual Override (Optional)</h4>
-            <p>If you prefer a different location, click the <strong>"Click map to override"</strong> button and click anywhere on the map. The system will instantly recalculate all hydrology for that specific point!</p>
+            <p>Click <strong>"Click map to override"</strong> and click any map location. The system instantly recalculates for that point.</p>
+          </div>
+        </div>
+      </div>
+
+      <h3 style="font-size: 15px; font-weight: 700; margin: 24px 0 12px; color: var(--text);">Option B — Draw an Area on the Map</h3>
+      <div class="flow-steps">
+        <div class="flow-step" style="border-left-color: #10B981;">
+          <div class="step-number" style="background: #10B981;">1</div>
+          <div class="step-content">
+            <h4>Click "🗺 Draw Area on Map"</h4>
+            <p>Your cursor changes to a crosshair. You can draw a rectangle anywhere in the world — no file upload needed.</p>
+          </div>
+        </div>
+        <div class="flow-step" style="border-left-color: #10B981;">
+          <div class="step-number" style="background: #10B981;">2</div>
+          <div class="step-content">
+            <h4>Click and Drag a Rectangle</h4>
+            <p>While dragging, a live area counter appears. Green = valid size. Red = too large (max <strong>10 sq km = 1,000 ha</strong>, configurable). Release the mouse to confirm.</p>
+          </div>
+        </div>
+        <div class="flow-step" style="border-left-color: #10B981;">
+          <div class="step-number" style="background: #10B981;">3</div>
+          <div class="step-content">
+            <h4>Click "▶ Analyze Selected Area"</h4>
+            <p>The backend automatically downloads free SRTM satellite elevation tiles for your rectangle from AWS, builds a DEM, and runs the full analysis pipeline.</p>
+          </div>
+        </div>
+        <div class="flow-step" style="border-left-color: #10B981;">
+          <div class="step-number" style="background: #10B981;">4</div>
+          <div class="step-content">
+            <h4>Results + Reference Boundary</h4>
+            <p>All results appear in the sidebar. Your original drawn rectangle stays visible on the map as a <strong>dashed blue boundary</strong> for reference, showing exactly what area was analyzed.</p>
           </div>
         </div>
       </div>
@@ -361,7 +396,52 @@
       </table>
     </section>
 
+
+    <!-- Section 5: Data Sources & Accuracy -->
+    <section class="section">
+      <h2 class="section-title">📡 Data Sources & Accuracy</h2>
+      <p>This system is built entirely on <strong>free, publicly available data</strong>. Here is what each data source provides and its known limitations:</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 22%">Data</th>
+            <th style="width: 22%">Source</th>
+            <th>Accuracy / Limitation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Elevation (KMZ path)</strong></td>
+            <td>User-supplied KMZ contour map</td>
+            <td>~1–2 m resolution. Highest precision. Best for final engineering design.</td>
+          </tr>
+          <tr>
+            <td><strong>Elevation (Draw Area path)</strong></td>
+            <td>AWS Terrarium Tiles (SRTM-derived, free, no key)</td>
+            <td>~38 m/pixel at zoom 12. Suitable for regional site selection. <em>Not recommended for precise embankment placement.</em></td>
+          </tr>
+          <tr>
+            <td><strong>Rainfall</strong></td>
+            <td>Open-Meteo ERA5-Land (primary) → NASA POWER MERRA-2 (fallback)</td>
+            <td>~9 km and ~50 km resolution respectively. 10-year historical average. Free, no key required.</td>
+          </tr>
+          <tr>
+            <td><strong>Water bodies & land use</strong></td>
+            <td>OpenStreetMap via Overpass API</td>
+            <td>Crowd-sourced. Coverage varies by region — excellent in India, gaps possible in very rural areas. System is fail-open: if unavailable, no exclusion is applied.</td>
+          </tr>
+          <tr>
+            <td><strong>Satellite basemap</strong></td>
+            <td>Esri World Imagery / CartoDB / OSM</td>
+            <td>Display only. Not used in any calculation.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
   </main>
+
 
 </body>
 </html>

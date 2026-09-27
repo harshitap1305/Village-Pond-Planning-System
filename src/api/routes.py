@@ -119,6 +119,78 @@ async def analyze_contour(
     return result
 
 
+@router.post(
+    "/analyzeArea",
+    response_model=AnalysisResult,
+    responses={
+        400: {"description": "Bounding box too large or degenerate"},
+        422: {"description": "No suitable pond candidates found in the selected area"},
+    },
+    summary="Analyze a user-drawn bounding box using free SRTM elevation tiles",
+    description=(
+        "Accepts a WGS84 bounding box drawn by the user on the map. "
+        "Downloads free SRTM-derived elevation tiles from AWS Terrarium (no API key, "
+        "~38 m resolution), stitches them into a DEM, and runs the full pond-analysis "
+        "pipeline. Returns the same AnalysisResult schema as /analyzeContour. "
+        "Maximum area is controlled by MAX_AREA_SELECTION_SQKM in .env."
+    ),
+)
+async def analyze_area(
+    south: float,
+    west: float,
+    north: float,
+    east: float,
+    pour_lat: float | None = None,
+    pour_lon: float | None = None,
+) -> AnalysisResult:
+    """
+    Run the pond-analysis pipeline on a user-drawn map rectangle.
+
+    - **south / west / north / east**: WGS84 bounding box corners in decimal degrees.
+    - **pour_lat / pour_lon**: Optional manual pour-point override (same as /analyzeContour).
+    """
+    from src.dem.from_tiles import build_dem_from_bbox
+
+    # ── Validate area size ────────────────────────────────────────────────────
+    # Approximate area in sq km using the flat-earth formula (good enough here).
+    lat_km = (north - south) * 111.0
+    lon_km = (east - west) * 111.0 * abs((north + south) / 2.0 * 0.01745)
+    area_sqkm = lat_km * lon_km
+    max_sqkm = settings.max_area_selection_sqkm
+
+    if area_sqkm > max_sqkm:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Selected area ({area_sqkm:.1f} sq km) exceeds the maximum allowed "
+                f"({max_sqkm} sq km). Please draw a smaller rectangle."
+            ),
+        )
+
+    if north <= south or east <= west:
+        raise HTTPException(status_code=400, detail="Degenerate bounding box.")
+
+    # ── Build DEM from Terrarium tiles ────────────────────────────────────────
+    try:
+        dem = await run_in_threadpool(build_dem_from_bbox, south, west, north, east)
+    except Exception as exc:
+        _log.error("Tile DEM build failed: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to download elevation tiles: {exc}",
+        ) from exc
+
+    # ── Run analysis pipeline on the tile DEM ─────────────────────────────────
+    result = await run_in_threadpool(
+        analysis_service.run_from_dem,
+        dem,
+        (south, west, north, east),
+        pour_lat,
+        pour_lon,
+    )
+    return result
+
+
 @router.get(
     "/results/{result_id}",
     response_model=AnalysisResult,

@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>How It Works — Village Pond Planner</title>
+
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --bg: #F8FAFC;
+      --surface: #FFFFFF;
+      --border: #E2E8F0;
+      --text: #1E293B;
+      --text-muted: #64748B;
+      --accent: #0EA5E9;
+      --accent-dark: #0284C7;
+      --accent-light: #E0F2FE;
+      --success: #10B981;
+      --success-bg: #D1FAE5;
+      --success-text: #065F46;
+      --radius: 10px;
+      --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 0 20px;
+    }
+
+    /* ─── Header ────────────────────────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 20px 40px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+    }
+    .brand-icon { font-size: 28px; }
+    .brand-text h1 { font-size: 18px; font-weight: 700; color: var(--text); }
+    .brand-text p { font-size: 13px; color: var(--text-muted); }
+    .btn-back {
+      padding: 8px 16px;
+      background: var(--accent-light);
+      color: var(--accent-dark);
+      text-decoration: none;
+      font-weight: 600;
+      border-radius: 6px;
+      font-size: 14px;
+      transition: background 0.15s;
+    }
+    .btn-back:hover { background: #BAE6FD; }
+
+    /* ─── Main Content ────────────────────────────────────────────── */
+    main {
+      max-width: 900px;
+      margin: 40px auto;
+      background: var(--surface);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .section {
+      padding: 40px;
+      border-bottom: 1px solid var(--border);
+    }
+    .section:last-child { border-bottom: none; }
+
+    .section-title {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .section p {
+      font-size: 15px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+
+    /* ─── Cards / Grids ──────────────────────────────────────────── */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-top: 20px;
+    }
+    .info-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+    }
+    .info-card h3 {
+      font-size: 15px;
+      color: var(--accent-dark);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .info-card p {
+      font-size: 13px;
+      margin-bottom: 0;
+    }
+
+    /* ─── Data Flow Diagram ──────────────────────────────────────── */
+    .flow-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-top: 24px;
+    }
+    .flow-step {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+      background: var(--bg);
+      padding: 16px;
+      border-radius: 8px;
+      border-left: 4px solid var(--accent);
+    }
+    .step-number {
+      background: var(--accent);
+      color: white;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .step-content h4 {
+      font-size: 15px;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+    .step-content p {
+      font-size: 13px;
+      margin-bottom: 0;
+    }
+
+    /* ─── Definitions Table ──────────────────────────────────────── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+    }
+    th, td {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      background: var(--bg);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    td {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+    td strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    @media (max-width: 768px) {
+      .grid-2 { grid-template-columns: 1fr; }
+      header { padding: 15px 20px; flex-direction: column; gap: 15px; align-items: flex-start; }
+      .section { padding: 25px 20px; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <a href="index.html" class="brand">
+      <div class="brand-icon">💧</div>
+      <div class="brand-text">
+        <h1>Village Pond Planner</h1>
+        <p>System Documentation & Guide</p>
+      </div>
+    </a>
+    <a href="index.html" class="btn-back">← Back to Map</a>
+  </header>
+
+  <main>
+    <!-- Section 1: Overview & Features -->
+    <section class="section">
+      <h2 class="section-title">🌟 What is this system?</h2>
+      <p>The <strong>Village Pond Planning System</strong> is an advanced hydrological tool designed to help civil engineers and village administrators find the perfect location to construct a rainwater harvesting pond.</p>
+      <p>Instead of relying on guesswork, the system uses physical terrain data, historical climate patterns, and satellite APIs to mathematically prove where a pond will capture the most water.</p>
+
+      <div class="grid-2">
+        <div class="info-card">
+          <h3>🗺️ Terrain Intelligence</h3>
+          <p>Extracts 3D elevation grids directly from your KML/KMZ contour maps to find natural depressions.</p>
+        </div>
+        <div class="info-card">
+          <h3>🚫 Smart Exclusion</h3>
+          <p>Connects to OpenStreetMap (OSM) to automatically prevent building dams on existing rivers, lakes, or residential housing.</p>
+        </div>
+        <div class="info-card">
+          <h3>🌧️ Climate Integration</h3>
+          <p>Fetches 10-year historical rainfall data from NASA POWER and Open-Meteo APIs for exact catchment coordinates.</p>
+        </div>
+        <div class="info-card">
+          <h3>📐 IS 5477 Compliance</h3>
+          <p>Designs the pond dimensions (depth, width, embankments) strictly following Indian standard civil engineering codes.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 2: How to Use -->
+    <section class="section">
+      <h2 class="section-title">🖱️ How to Use It</h2>
+      <div class="flow-steps">
+        <div class="flow-step">
+          <div class="step-number">1</div>
+          <div class="step-content">
+            <h4>Upload your Terrain Data</h4>
+            <p>Drag and drop a <code>.kml</code> or <code>.kmz</code> file containing contour lines into the sidebar. The system requires accurate topography to work.</p>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-number">2</div>
+          <div class="step-content">
+            <h4>Wait for AI Analysis</h4>
+            <p>The backend will take ~60 seconds to build a 3D model, simulate water flow, exclude built-up lands, fetch satellite weather data, and generate pond dimensions.</p>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-number">3</div>
+          <div class="step-content">
+            <h4>Review the Optimal Site (★)</h4>
+            <p>The map will center on the best pond location (marked with a red star). The sidebar will populate with the exact engineering metrics needed to construct the pond.</p>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-number">4</div>
+          <div class="step-content">
+            <h4>Manual Override (Optional)</h4>
+            <p>If you prefer a different location, click the <strong>"Click map to override"</strong> button and click anywhere on the map. The system will instantly recalculate all hydrology for that specific point!</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 3: How the Backend Works -->
+    <section class="section">
+      <h2 class="section-title">⚙️ How It Works (The Engine)</h2>
+      <p>When you upload a file, a complex multi-stage pipeline runs on the server:</p>
+
+      <div class="flow-steps">
+        <div class="flow-step">
+          <div class="step-number">A</div>
+          <div class="step-content">
+            <h4>DEM Generation & Conditioning</h4>
+            <p>The KML contours are interpolated into a 2-meter resolution Digital Elevation Model (DEM). The <i>Priority-Flood</i> algorithm is applied to simulate how water fills the terrain.</p>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-number">B</div>
+          <div class="step-content">
+            <h4>Flow Routing (D8) & Sinks</h4>
+            <p>The system calculates Flow Direction and Flow Accumulation (using the D8 method) to find where water naturally pools into "sinks" (depressions).</p>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-number">C</div>
+          <div class="step-content">
+            <h4>Catchment Delineation</h4>
+            <p>Once the best depression is found, a Breadth-First Search (BFS) traces upstream to map the exact watershed boundary (the "Catchment Area") that feeds water to this pond.</p>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-number">D</div>
+          <div class="step-content">
+            <h4>SCS-CN Runoff Estimation</h4>
+            <p>Using 10-year average rainfall from NASA, the system applies the USDA SCS-CN (Curve Number) method. This calculates exactly how much rain gets absorbed by the soil vs. how much becomes usable runoff.</p>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-number">E</div>
+          <div class="step-content">
+            <h4>Pond Dimensioning (IS 5477)</h4>
+            <p>Finally, the algorithm sizes the physical dam. It calculates Live Storage, Dead Storage (for silt), and Evaporation Freeboard to guarantee the pond won't dry up in summer or overflow in monsoon.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 4: Understanding the Results -->
+    <section class="section">
+      <h2 class="section-title">📊 Understanding the Results</h2>
+      <p>Here is what the numbers in the sidebar actually mean:</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 25%">Metric</th>
+            <th>Meaning</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Catchment Area</strong></td>
+            <td>The total land area (in hectares) uphill from the pond. Every drop of rain that falls in this zone will flow down into your pond.</td>
+          </tr>
+          <tr>
+            <td><strong>Runoff Depth</strong></td>
+            <td>The amount of rainfall that actually flows over the ground (after accounting for soil soaking it up and evaporation).</td>
+          </tr>
+          <tr>
+            <td><strong>Live Storage</strong></td>
+            <td>The actual volume of usable water (in cubic meters) the pond will hold for village use.</td>
+          </tr>
+          <tr>
+            <td><strong>Total Storage</strong></td>
+            <td>The total volume of the pond, which includes the Live Storage + Dead Storage (space for mud/silt to settle) + Freeboard (safety height).</td>
+          </tr>
+          <tr>
+            <td><strong>Topographic Capacity</strong></td>
+            <td>The maximum physical amount of water the natural terrain bowl could hold before overflowing its rim.</td>
+          </tr>
+          <tr>
+            <td><strong>Design Constrained By</strong></td>
+            <td>If this says <code>hydrology</code>, it means we limited the pond size because there isn't enough rain to fill a bigger one. If it says <code>topography</code>, it means there is plenty of rain, but the physical hole in the ground isn't big enough!</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+  </main>
+
+</body>
+</html>

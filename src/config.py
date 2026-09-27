@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     # Maximum number of ranked candidate locations returned by the API.
     max_candidates: int = 10
 
+    # Maximum area (sq km) a user is allowed to select via the Draw Area tool.
+    # Larger areas = more Terrarium tiles to download → longer analysis time.
+    # 10 sq km = ~1000 ha, sufficient for any village-scale pond planning.
+    max_area_selection_sqkm: float = 10.0
+
     # ── Output ────────────────────────────────────────────────────────────────
     # Shapely simplify tolerance (metres) for catchment polygon sent to frontend.
     # Reduces vertex count for smoother map rendering.

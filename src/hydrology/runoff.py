@@ -176,13 +176,11 @@ def _scs_cn_monthly_distributed(
     monthly_runoff_mm: list[float] = []
 
     for m_idx, month_total_mm in enumerate(monthly_avg_mm):
-        days = _DAYS_IN_MONTH[m_idx]
-        # Distribute monthly total evenly across days
-        p_day = month_total_mm / days if days > 0 else 0.0
-        # SCS-CN event on the representative daily depth
-        q_day_mm = _scs_cn_event(p_day, s_mm, ia_mm)
-        # Sum across all days in the month
-        q_month_mm = q_day_mm * days
+        # Apply SCS-CN directly to the monthly total.
+        # While originally an event-based model, adapting it to monthly
+        # totals is a standard simplification that avoids the "zero runoff"
+        # bug caused by distributing rain too thinly across all 30 days.
+        q_month_mm = _scs_cn_event(month_total_mm, s_mm, ia_mm)
         monthly_runoff_mm.append(q_month_mm)
 
     annual_depth_mm = sum(monthly_runoff_mm)

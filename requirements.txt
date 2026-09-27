@@ -29,6 +29,9 @@ pysheds==0.3.5
 fastkml==0.12
 lxml==5.2.1
 
+# ─── Image Processing (Terrarium tile decoding in src/dem/from_tiles.py) ──────
+Pillow==10.3.0
+
 # ─── Visualization (debug scripts only, not deployed) ─────────────────────────
 matplotlib==3.8.4
 

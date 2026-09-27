@@ -390,6 +390,210 @@ class AnalysisService:
             warnings=_warnings,
         )
 
+    def run_from_dem(
+        self,
+        dem: "DEM",  # noqa: F821 — imported locally to avoid circular imports
+        bbox_wgs84: tuple[float, float, float, float],  # (south, west, north, east)
+        pour_lat: float | None = None,
+        pour_lon: float | None = None,
+    ) -> AnalysisResult:
+        """
+        Run the analysis pipeline on a pre-built DEM (e.g. from Terrarium tiles).
+
+        Skips KML parsing and DEM construction (steps 1–5 of the KML pipeline)
+        and jumps directly to sink-filling, candidate detection, rainfall, runoff,
+        pond design, and watershed delineation.
+
+        Args:
+            dem:          A fully constructed :class:`~src.schemas.dem.DEM` object.
+            bbox_wgs84:   The WGS84 bounding box (south, west, north, east) that
+                          was used to fetch the DEM — used for OSM API queries.
+            pour_lat:     Optional manual pour-point latitude (WGS84).
+            pour_lon:     Optional manual pour-point longitude (WGS84).
+
+        Returns:
+            :class:`AnalysisResult` — same schema as the KML pipeline.
+        """
+        _t0 = time.perf_counter()
+        _warnings: list[str] = []
+
+        south, west, north, east = bbox_wgs84
+        dem_bbox_osm = (south, west, north, east)  # (S, W, N, E) for OSM calls
+
+        _log.info(
+            "run_from_dem: bbox=(%.4f,%.4f,%.4f,%.4f), DEM=%dx%d, cell=%.1fm",
+            south,
+            west,
+            north,
+            east,
+            dem.rows,
+            dem.cols,
+            dem.cell_size,
+        )
+
+        # ── Fill sinks + compute slope ────────────────────────────────────────
+        filled_dem = fill_sinks(dem)
+        slope = compute_slope_deg(filled_dem)
+        _log.info("Sinks filled, slope computed (tile DEM)")
+
+        # ── OSM water & land exclusion masks ─────────────────────────────────
+        water_result = build_water_exclusion_mask(
+            dem=dem,
+            dem_bbox_wgs84=dem_bbox_osm,
+            slope_deg=slope,
+            settings=settings,
+        )
+        land_result = build_land_exclusion_mask(
+            dem=dem,
+            dem_bbox_wgs84=dem_bbox_osm,
+            settings=settings,
+        )
+        _log.info(
+            "Exclusion masks: water=%d cells, land=%d cells",
+            int(water_result.mask.sum()),
+            int(land_result.mask.sum()),
+        )
+
+        # ── Candidate detection ───────────────────────────────────────────────
+        candidates, _cond_dem, flow_dir_cond, flow_accum_cond = find_candidates(
+            dem,
+            filled_dem,
+            water_mask=water_result.mask,
+            land_mask=land_result.mask,
+            slope_deg=slope,
+        )
+        if not candidates:
+            raise ValueError(
+                "No suitable pond candidates found in the selected area. "
+                "Try a larger bounding box or a different location."
+            )
+
+        # ── Pour-point override ───────────────────────────────────────────────
+        if pour_lat is not None and pour_lon is not None:
+            selected = _find_nearest_candidate(candidates, pour_lat, pour_lon)
+            _warnings.append("pour_point_overridden")
+        else:
+            selected = candidates[0]
+
+        _log.info(
+            "Found %d candidates; selected lat=%.6f lon=%.6f score=%.4f",
+            len(candidates),
+            selected.lat,
+            selected.lon,
+            selected.score,
+        )
+
+        # ── Rainfall ──────────────────────────────────────────────────────────
+        rainfall_stats = build_rainfall_stats(
+            lat=selected.lat,
+            lon=selected.lon,
+            settings=settings,
+        )
+        if rainfall_stats is None:
+            _warnings.append("rainfall_unavailable")
+
+        # ── Runoff ────────────────────────────────────────────────────────────
+        runoff_estimate: RunoffEstimate | None = None
+        if rainfall_stats is not None:
+            builtup_fraction = (
+                float(land_result.mask.sum()) / float(land_result.mask.size)
+                if land_result.mask.size > 0
+                else 0.0
+            )
+            try:
+                runoff_estimate = estimate_runoff(
+                    catchment_area_ha=selected.catchment_area_ha,
+                    rainfall_stats=rainfall_stats,
+                    builtup_fraction=builtup_fraction,
+                    hsg=settings.default_hsg,
+                    runoff_coefficient_fallback=settings.runoff_coefficient_fallback,
+                )
+                if runoff_estimate.method == "rational_annual_fallback":
+                    _warnings.append("runoff_using_rational_fallback")
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("Runoff estimation failed (%s)", exc)
+                _warnings.append("runoff_unavailable")
+        else:
+            _warnings.append("runoff_unavailable")
+
+        # ── Pond design ───────────────────────────────────────────────────────
+        pond_design: PondDesign | None = None
+        if runoff_estimate is not None:
+            try:
+                pond_design = recommend_pond_design(
+                    runoff_estimate=runoff_estimate,
+                    topographic_storage_m3=selected.estimated_storage_m3,
+                    depression_area_ha=selected.depression_area_ha,
+                    settings=settings,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("Pond design failed (%s)", exc)
+                _warnings.append("pond_design_unavailable")
+        else:
+            _warnings.append("pond_design_unavailable")
+
+        # ── Watershed delineation & polygonization ────────────────────────────
+        for cand in candidates:
+            cand_mask = delineate_catchment(
+                flow_dir_cond, seed_cells=cand.bowl_sink_rcs
+            )
+            cand_poly = mask_to_polygon(cand_mask, filled_dem)
+            cand.catchment_polygon_geojson = mapping(cand_poly)
+
+        mask = delineate_catchment(flow_dir_cond, seed_cells=selected.bowl_sink_rcs)
+        polygon = mask_to_polygon(mask, filled_dem)
+
+        # ── Metrics ───────────────────────────────────────────────────────────
+        metrics = compute_metrics(mask, filled_dem, slope)
+        accum_sum = int(sum(flow_accum_cond[rc] for rc in selected.bowl_sink_rcs))
+        assert_area_consistency(
+            metrics, accum_sum, num_seeds=len(selected.bowl_sink_rcs)
+        )
+
+        # ── Assemble response ─────────────────────────────────────────────────
+        processing_time_ms = round((time.perf_counter() - _t0) * 1000, 1)
+        _log.info(
+            "run_from_dem complete: %.0f ms, warnings=%s",
+            processing_time_ms,
+            _warnings or "none",
+        )
+
+        _warnings.append("dem_from_tiles_low_resolution")  # always flag tile DEM
+
+        return AnalysisResult(
+            candidate_locations=candidates,
+            selected_location=selected,
+            catchment=CatchmentResult(
+                area_ha=metrics.area_ha,
+                polygon_geojson=mapping(polygon),
+                elevation_stats=metrics.elevation_stats,
+                slope_stats=metrics.slope_stats,
+            ),
+            metadata=AnalysisMetadata(
+                dem_rows=dem.rows,
+                dem_cols=dem.cols,
+                dem_cell_size_m=dem.cell_size,
+                crs_used=dem.crs,
+                contour_count=0,  # no contours — DEM came from tiles
+                processing_time_ms=processing_time_ms,
+            ),
+            water_exclusion=WaterExclusionMetadata(
+                source=water_result.source,
+                excluded_feature_count=water_result.feature_count,
+                attribution=water_result.attribution,
+            ),
+            land_exclusion=LandExclusionMetadata(
+                source=land_result.source,
+                excluded_feature_count=land_result.feature_count,
+                builtup_cells_masked=int(land_result.mask.sum()),
+                attribution=land_result.attribution,
+            ),
+            rainfall=rainfall_stats,
+            runoff=runoff_estimate,
+            pond_design=pond_design,
+            warnings=_warnings,
+        )
+
 
 # Module-level singleton — import this in routes.py
 analysis_service = AnalysisService()

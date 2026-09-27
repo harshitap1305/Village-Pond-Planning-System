@@ -398,12 +398,15 @@
 
 <!-- ─── Sidebar ──────────────────────────────────────────────────── -->
 <aside id="sidebar">
-  <div id="sidebar-header">
-    <span class="logo-icon">💧</span>
-    <div>
-      <h1>Village Pond Planner</h1>
-      <p>AI-based site selection system</p>
+  <div id="sidebar-header" style="justify-content: space-between;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <span class="logo-icon">💧</span>
+      <div>
+        <h1>Village Pond Planner</h1>
+        <p>AI-based site selection</p>
+      </div>
     </div>
+    <a href="help.html" style="font-size: 11px; font-weight: 600; color: var(--accent-dark); background: var(--accent-light); padding: 4px 8px; border-radius: 4px; text-decoration: none;">How it works</a>
   </div>
 
   <div id="sidebar-body">
@@ -412,6 +415,34 @@
       <label for="village-search" style="font-size: 12px; font-weight: 600; color: var(--text); display: block; margin-bottom: 6px;">Search Predefined Village</label>
       <input type="text" id="village-search" placeholder="E.g., Test Village..." autocomplete="off" style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; font-family: inherit; outline: none; transition: border-color 0.15s;" />
       <ul id="village-results" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-md); list-style: none; margin: 4px 0 0 0; padding: 0; max-height: 200px; overflow-y: auto; z-index: 100;"></ul>
+    </div>
+
+    <!-- Draw Area zone -->
+    <div id="draw-area-zone" style="margin-bottom: 14px;">
+      <div style="font-size: 11px; font-weight: 600; color: var(--text-muted); text-align: center; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.07em;">or</div>
+      <button id="btn-draw-area" style="
+        width: 100%; padding: 11px 14px;
+        background: #F0FDF4; color: #166534;
+        border: 1.5px solid #86EFAC;
+        border-radius: var(--radius-sm);
+        font-size: 13px; font-weight: 600;
+        cursor: pointer; font-family: inherit;
+        transition: background 0.15s, border-color 0.15s;
+        display: flex; align-items: center; justify-content: center; gap: 8px;
+      ">🗺 Draw Area on Map</button>
+      <p id="draw-area-hint" style="font-size: 11px; color: var(--text-muted); margin-top: 6px; display: none; line-height: 1.4;">
+        Click and drag to draw a rectangle. Max <span id="draw-area-limit">10</span> sq km.<br>
+        Press <kbd>Esc</kbd> to cancel.
+      </p>
+      <p id="draw-area-status" style="font-size: 12px; font-weight: 500; color: var(--text); margin-top: 6px; display: none;"></p>
+      <button id="btn-analyze-area" hidden style="
+        width: 100%; margin-top: 8px; padding: 11px 14px;
+        background: var(--success); color: white;
+        border: none; border-radius: var(--radius-sm);
+        font-size: 13px; font-weight: 600;
+        cursor: pointer; font-family: inherit;
+        transition: opacity 0.15s;
+      ">▶ Analyze Selected Area</button>
     </div>
 
     <!-- Upload zone -->
@@ -517,6 +548,7 @@
   const TILE_ATTR     = ENV.TILE_ATTRIBUTION ?? '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
   const MAP_VIEW      = ENV.MAP_INITIAL_VIEW ?? [22.5, 80.0, 5];
   const MAX_UPLOAD_MB = ENV.MAX_UPLOAD_MB ?? 20;
+  const MAX_AREA_SQKM = ENV.MAX_AREA_SELECTION_SQKM ?? 10;
 
   /* ─── Constants ──────────────────────────────────────────────── */
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -532,6 +564,8 @@
       'Pond design skipped (requires runoff estimate).',
     'pour_point_overridden':
       'Manual pour-point override active — selected site snapped to nearest auto-detected candidate bowl.',
+    'dem_from_tiles_low_resolution':
+      '⚠️ DEM sourced from free SRTM satellite tiles (~38 m resolution). Results are suitable for regional site selection. For precise final design, upload a KMZ contour map.',
   };
 
   /* ─── DOM refs ───────────────────────────────────────────────── */
@@ -573,7 +607,13 @@
     searchTimeout = setTimeout(async () => {
       try {
         const resp = await fetch(`${API_BASE_URL}/village/search?q=${encodeURIComponent(q)}`);
-        if (!resp.ok) return;
+        if (!resp.ok) {
+          if (resp.status === 503) {
+            searchResults.innerHTML = '<li style="padding: 10px 12px; font-size: 13px; color: #EF4444;">Search disabled (Database not configured)</li>';
+            searchResults.style.display = 'block';
+          }
+          return;
+        }
         const villages = await resp.json();
 
         if (villages.length === 0) {
@@ -764,6 +804,179 @@
     e.preventDefault();
     uploadZone.classList.remove('drag-over');
     if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+
+  /* ─── Draw Area feature ──────────────────────────────────────── */
+  const btnDrawArea     = document.getElementById('btn-draw-area');
+  const drawAreaHint    = document.getElementById('draw-area-hint');
+  const drawAreaStatus  = document.getElementById('draw-area-status');
+  const btnAnalyzeArea  = document.getElementById('btn-analyze-area');
+  const drawAreaLimitEl = document.getElementById('draw-area-limit');
+
+  drawAreaLimitEl.textContent = MAX_AREA_SQKM;
+
+  let drawMode    = false;   // are we in rectangle-drawing mode?
+  let drawStart   = null;    // Leaflet LatLng of mousedown
+  let drawRect    = null;    // current live Leaflet rectangle
+  let drawnBbox   = null;    // finalised {south,west,north,east}
+
+  function enterDrawMode() {
+    drawMode = true;
+    btnDrawArea.textContent = '✕ Cancel Drawing (Esc)';
+    btnDrawArea.style.background = '#FEF2F2';
+    btnDrawArea.style.color = '#DC2626';
+    btnDrawArea.style.borderColor = '#FCA5A5';
+    drawAreaHint.style.display = 'block';
+    drawAreaStatus.style.display = 'none';
+    btnAnalyzeArea.hidden = true;
+    drawnBbox = null;
+    mapContainer.style.cursor = 'crosshair';
+    map.dragging.disable();
+    map.getContainer().style.cursor = 'crosshair';
+  }
+
+  function exitDrawMode() {
+    drawMode = false;
+    drawStart = null;
+    btnDrawArea.textContent = '🗺 Draw Area on Map';
+    btnDrawArea.style.background = '#F0FDF4';
+    btnDrawArea.style.color = '#166534';
+    btnDrawArea.style.borderColor = '#86EFAC';
+    drawAreaHint.style.display = 'none';
+    mapContainer.style.cursor = '';
+    map.dragging.enable();
+    map.getContainer().style.cursor = '';
+  }
+
+  function cancelDrawMode() {
+    if (drawRect) { map.removeLayer(drawRect); drawRect = null; }
+    drawAreaStatus.style.display = 'none';
+    btnAnalyzeArea.hidden = true;
+    drawnBbox = null;
+    exitDrawMode();
+  }
+
+  btnDrawArea.addEventListener('click', () => {
+    if (drawMode) cancelDrawMode();
+    else enterDrawMode();
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && drawMode) cancelDrawMode();
+  });
+
+  // Helper: Haversine approximate area in sq km
+  function bboxAreaSqKm(south, west, north, east) {
+    const latKm = (north - south) * 111.0;
+    const midLat = (north + south) / 2.0;
+    const lonKm  = (east - west) * 111.0 * Math.cos(midLat * Math.PI / 180);
+    return latKm * lonKm;
+  }
+
+  map.on('mousedown', e => {
+    if (!drawMode || e.originalEvent.button !== 0) return;
+    drawStart = e.latlng;
+    if (drawRect) { map.removeLayer(drawRect); drawRect = null; }
+    // Prevent map dragging while drawing
+    L.DomEvent.stop(e);
+  });
+
+  map.on('mousemove', e => {
+    if (!drawMode || !drawStart) return;
+    const bounds = L.latLngBounds(drawStart, e.latlng);
+    if (drawRect) {
+      drawRect.setBounds(bounds);
+    } else {
+      drawRect = L.rectangle(bounds, {
+        color: '#10B981', weight: 2, dashArray: '6 4',
+        fillColor: '#10B981', fillOpacity: 0.10,
+      }).addTo(map);
+    }
+    // Live area feedback
+    const s = Math.min(drawStart.lat, e.latlng.lat);
+    const n = Math.max(drawStart.lat, e.latlng.lat);
+    const w = Math.min(drawStart.lng, e.latlng.lng);
+    const ec = Math.max(drawStart.lng, e.latlng.lng);
+    const areaSqKm = bboxAreaSqKm(s, w, n, ec);
+    drawAreaStatus.style.display = 'block';
+    if (areaSqKm > MAX_AREA_SQKM) {
+      drawAreaStatus.style.color = '#DC2626';
+      drawAreaStatus.textContent = `⚠ Area: ${areaSqKm.toFixed(1)} sq km (limit: ${MAX_AREA_SQKM})`;
+    } else {
+      drawAreaStatus.style.color = '#166534';
+      drawAreaStatus.textContent = `✓ Area: ${areaSqKm.toFixed(1)} sq km`;
+    }
+  });
+
+  map.on('mouseup', e => {
+    if (!drawMode || !drawStart) return;
+    const end = e.latlng;
+    const south = Math.min(drawStart.lat, end.lat);
+    const north = Math.max(drawStart.lat, end.lat);
+    const west  = Math.min(drawStart.lng, end.lng);
+    const east  = Math.max(drawStart.lng, end.lng);
+
+    drawStart = null;
+    exitDrawMode();
+
+    const areaSqKm = bboxAreaSqKm(south, west, north, east);
+
+    if (areaSqKm < 0.01) {
+      if (drawRect) { map.removeLayer(drawRect); drawRect = null; }
+      drawAreaStatus.style.display = 'none';
+      return; // too small — ignore accidental single clicks
+    }
+
+    if (areaSqKm > MAX_AREA_SQKM) {
+      drawAreaStatus.style.color = '#DC2626';
+      drawAreaStatus.textContent = `⚠ Area too large (${areaSqKm.toFixed(1)} sq km). Max is ${MAX_AREA_SQKM} sq km. Please redraw.`;
+      drawAreaStatus.style.display = 'block';
+      btnAnalyzeArea.hidden = true;
+      drawnBbox = null;
+      return;
+    }
+
+    // Valid bbox — style it solid and show the analyze button
+    if (drawRect) {
+      drawRect.setStyle({ dashArray: null, fillOpacity: 0.12, weight: 2 });
+    }
+    drawnBbox = { south, west, north, east };
+    drawAreaStatus.style.color = '#166534';
+    drawAreaStatus.textContent = `✓ ${areaSqKm.toFixed(2)} sq km selected`;
+    drawAreaStatus.style.display = 'block';
+    btnAnalyzeArea.hidden = false;
+    map.fitBounds([[south, west], [north, east]], { padding: [30, 30] });
+  });
+
+  btnAnalyzeArea.addEventListener('click', async () => {
+    if (!drawnBbox) return;
+    const { south, west, north, east } = drawnBbox;
+
+    clearPreviousLayers();
+    if (drawRect) { map.removeLayer(drawRect); drawRect = null; }
+    cancelOverrideMode();
+    resultsEl.hidden = true;
+    legendEl.hidden  = true;
+    warningsEl.hidden = true;
+    btnAnalyzeArea.hidden = true;
+    drawAreaStatus.style.display = 'none';
+    showLoading(true);
+
+    try {
+      const url = `${API_BASE_URL}/analyzeArea?south=${south}&west=${west}&north=${north}&east=${east}`;
+      const resp = await fetch(url, { method: 'POST' });
+      if (!resp.ok) {
+        let msg = `HTTP ${resp.status}`;
+        try { msg = (await resp.json()).detail || msg; } catch (_) {}
+        showError(msg);
+        return;
+      }
+      renderResult(await resp.json());
+    } catch (err) {
+      showError('Network error during area analysis: ' + err.message);
+    } finally {
+      showLoading(false);
+    }
   });
 
   /* ─── Main file handler ──────────────────────────────────────── */

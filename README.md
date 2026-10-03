@@ -385,19 +385,6 @@ Frontend variables (in `frontend/env.js`):
 
 ---
 
-## LLM Usage
-
-This project used LLM assistance (Google Gemini / Claude) throughout development. The usage was transparent and verification-first:
-
-- **Architecture review**: LLMs were used to review HLD documents and flag inconsistencies (e.g., scoring formula mismatch, area-consistency thresholds).
-- **Code generation**: Boilerplate for new modules (rainfall clients, pond design, DB models) was AI-generated then manually verified against reference standards (SCS-CN tables, IS 5477, OSM tagging conventions).
-- **Test generation**: Unit test skeletons were AI-generated; all test values were hand-computed or cross-referenced against published formula results.
-- **Bug finding**: LLM review caught a real bug (flow-routing inconsistency between candidacy and watershed delineation) that was subsequently fixed and verified with a regression test.
-
-In all cases, every generated code block was read, understood, and validated before being committed. No AI output was accepted without independent verification.
-
----
-
 ## License
 
 MIT — see [LICENSE](LICENSE)
